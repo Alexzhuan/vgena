@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #09090b;
+  --color-surface: #18181b;
+  --color-surface-elevated: #27272a;
+  --color-border: #3f3f46;
+  --color-text: #fafafa;
+  --color-text-muted: #a1a1aa;
+  --color-accent: #6366f1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Video player container */
+.video-container {
+  position: relative;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Animation utilities */
+.animate-stagger > * {
+  animation: slideUp 0.3s ease-out forwards;
+  opacity: 0;
+}
+
+.animate-stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.animate-stagger > *:nth-child(2) { animation-delay: 0.1s; }
+.animate-stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.animate-stagger > *:nth-child(4) { animation-delay: 0.2s; }
+.animate-stagger > *:nth-child(5) { animation-delay: 0.25s; }
+
+/* Focus states */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Score button styles */
+.score-btn {
+  @apply w-10 h-10 rounded-lg font-semibold transition-all duration-150;
+  @apply border-2 border-surface-600 bg-surface-800 text-surface-300;
+  @apply hover:border-accent-400 hover:text-white;
+}
+
+.score-btn.active {
+  @apply border-accent-500 bg-accent-600 text-white shadow-lg shadow-accent-500/20;
+}
+
+/* Checklist item styles */
+.checklist-item {
+  @apply flex items-center gap-3 px-3 py-2 rounded-lg transition-all;
+  @apply hover:bg-surface-800 cursor-pointer;
+}
+
+.checklist-item input[type="checkbox"] {
+  @apply w-4 h-4 rounded border-2 border-surface-500;
+  @apply checked:bg-accent-500 checked:border-accent-500;
+  @apply focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 focus:ring-offset-surface-900;
+}
+
+/* Keyboard shortcut badge */
+.kbd {
+  @apply inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-mono;
+  @apply bg-surface-700 text-surface-300 rounded border border-surface-600;
+  min-width: 1.5rem;
+}

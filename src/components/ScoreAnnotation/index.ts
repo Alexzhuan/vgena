@@ -1,0 +1,1 @@
+export { ScoreAnnotation } from './ScoreAnnotation'
