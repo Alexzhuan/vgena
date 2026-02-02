@@ -1,7 +1,5 @@
 import { create } from 'zustand'
 import type {
-  PairAnnotationResult,
-  ScoreAnnotationResult,
   PairSampleResult,
   ScoreSampleResult,
   QAPairStats,

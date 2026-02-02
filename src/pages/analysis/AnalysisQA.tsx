@@ -2,7 +2,6 @@ import { useState, useCallback, useMemo } from 'react'
 import { AnalysisHeader } from '../../components/analysis'
 import { useQAStore } from '../../stores/qaStore'
 import { DIMENSION_LABELS, DIMENSIONS } from '../../types'
-import type { Dimension } from '../../types'
 import type { 
   QAPairSampleResult, 
   QAScoreSampleResult,
@@ -22,8 +21,6 @@ import {
   Search,
 } from 'lucide-react'
 import clsx from 'clsx'
-
-type ViewMode = 'pair' | 'score'
 
 export function AnalysisQA() {
   const {
