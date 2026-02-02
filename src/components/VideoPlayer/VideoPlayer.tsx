@@ -372,8 +372,16 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* Controls - appear on hover */}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-12 pb-2 px-3 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Clickable video area - click to toggle play/pause */}
+      {!isLoading && !error && (
+        <div 
+          className="absolute inset-0 cursor-pointer z-10" 
+          onClick={togglePlay}
+        />
+      )}
+
+      {/* Controls - appear on hover - z-20 ensures controls are above click layer */}
+      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-12 pb-2 px-3 opacity-0 group-hover:opacity-100 transition-opacity">
         {/* Progress bar with buffer indicator */}
         <div 
           ref={progressRef}
@@ -497,17 +505,6 @@ export function VideoPlayer({
         </div>
       </div>
 
-      {/* Center play button when paused */}
-      {!isPlaying && !isLoading && !error && (
-        <button
-          onClick={togglePlay}
-          className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur flex items-center justify-center hover:bg-white/30 transition-colors">
-            <Play className="w-8 h-8 ml-1" />
-          </div>
-        </button>
-      )}
     </div>
   )
 }

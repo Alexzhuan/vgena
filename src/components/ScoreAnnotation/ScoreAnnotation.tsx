@@ -166,7 +166,7 @@ export function ScoreAnnotation({ sample }: ScoreAnnotationProps) {
             {/* Prompt text */}
             <div className="flex-1 min-w-0">
               <div className="text-xs text-surface-400 mb-1">Prompt</div>
-              <p className="text-surface-100 leading-relaxed text-sm">{sample.prompt}</p>
+              <p className="text-surface-100 leading-relaxed text-base font-medium">{sample.prompt}</p>
             </div>
 
             {/* GT Video toggle */}
