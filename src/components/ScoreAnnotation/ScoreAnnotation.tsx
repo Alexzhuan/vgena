@@ -188,11 +188,28 @@ export function ScoreAnnotation({ sample }: ScoreAnnotationProps) {
           </div>
         </div>
 
-        {/* Video area - has its own width constraint */}
+        {/* Video area - First frame + Video side by side */}
         <div className="flex-shrink-0 p-4">
           <div className={clsx(
-            showGtVideo ? 'grid grid-cols-2 gap-4' : 'max-w-2xl mx-auto'
+            'grid gap-4',
+            showGtVideo ? 'grid-cols-3' : 'grid-cols-2'
           )}>
+            {/* First frame - aspect ratio matching video */}
+            <div className="aspect-video bg-surface-800 rounded-lg overflow-hidden relative group">
+              <img 
+                src={sample.first_frame_url}
+                alt="First frame"
+                className="w-full h-full object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => setShowImageModal(true)}
+              />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                <ZoomIn className="w-8 h-8" />
+              </div>
+              <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/70 rounded text-sm font-medium">
+                首帧
+              </div>
+            </div>
+            {/* Generated video */}
             <div className="aspect-video">
               <VideoPlayer
                 src={sample.video_url}
