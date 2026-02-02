@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Home, FileText, BarChart3, CheckCircle, ListChecks } from 'lucide-react'
+import { Home, FileText, BarChart3, CheckCircle, ListChecks, ClipboardCheck } from 'lucide-react'
 import clsx from 'clsx'
 
 interface NavItem {
@@ -28,6 +28,11 @@ const navItems: NavItem[] = [
     to: '/analysis/consistency',
     icon: <CheckCircle className="w-5 h-5" />,
     label: '一致性验证',
+  },
+  {
+    to: '/analysis/qa',
+    icon: <ClipboardCheck className="w-5 h-5" />,
+    label: '标注质检',
   },
 ]
 

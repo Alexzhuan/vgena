@@ -177,3 +177,123 @@ export interface UploadedFileRecord {
   mode: 'pair' | 'score'
   sampleCount: number
 }
+
+// ============================================
+// Quality Assurance (QA) Types
+// ============================================
+
+/**
+ * Problem level for score mode QA
+ */
+export type QAProblemLevel = 'none' | 'minor' | 'major'
+
+/**
+ * Pair mode - single dimension QA result
+ */
+export interface QAPairDimensionResult {
+  dimension: Dimension
+  goldenComparison: ComparisonResult
+  annotatorComparison: ComparisonResult
+  isMatch: boolean
+}
+
+/**
+ * Pair mode - single sample QA result
+ */
+export interface QAPairSampleResult {
+  sampleId: string
+  annotatorId: string
+  dimensionResults: QAPairDimensionResult[]
+  matchedCount: number  // Number of matched dimensions
+  totalDimensions: number  // Always 5
+  hardMatch: boolean  // All 5 dimensions match
+  softMatchRate: number  // matchedCount / 5
+  prompt?: string
+  videoAModel?: string
+  videoBModel?: string
+}
+
+/**
+ * Score mode - single dimension QA result
+ */
+export interface QAScoreDimensionResult {
+  dimension: Dimension
+  goldenScore: number
+  annotatorScore: number
+  goldenLevel: QAProblemLevel
+  annotatorLevel: QAProblemLevel
+  isExactMatch: boolean  // Score exactly equal
+  isLevelMatch: boolean  // Problem level equal
+}
+
+/**
+ * Score mode - single sample QA result
+ */
+export interface QAScoreSampleResult {
+  sampleId: string
+  annotatorId: string
+  dimensionResults: QAScoreDimensionResult[]
+  exactMatchCount: number  // Number of dimensions with exact score match
+  levelMatchCount: number  // Number of dimensions with level match
+  totalDimensions: number  // Always 5
+  hardMatch: boolean  // All 5 dimensions have exact score match
+  softMatchRate: number  // levelMatchCount / 5
+  prompt?: string
+  videoModel?: string
+}
+
+/**
+ * Pair mode - overall QA statistics
+ */
+export interface QAPairStats {
+  mode: 'pair'
+  totalSamples: number
+  hardMatchCount: number  // Samples where all dimensions match
+  hardMatchRate: number
+  avgSoftMatchRate: number  // Average dimension match rate across all samples
+  byDimension: Record<Dimension, {
+    total: number
+    matchCount: number
+    matchRate: number
+  }>
+  byAnnotator: Record<string, {
+    total: number
+    hardMatchCount: number
+    hardMatchRate: number
+    avgSoftMatchRate: number
+  }>
+  mismatchedSamples: QAPairSampleResult[]  // Samples that don't hard match
+}
+
+/**
+ * Score mode - overall QA statistics
+ */
+export interface QAScoreStats {
+  mode: 'score'
+  totalSamples: number
+  hardMatchCount: number  // Samples where all dimensions have exact score match
+  hardMatchRate: number
+  softMatchCount: number  // Samples where all dimensions have same problem level
+  softMatchRate: number
+  avgExactMatchRate: number  // Average exact score match rate
+  avgLevelMatchRate: number  // Average level match rate
+  byDimension: Record<Dimension, {
+    total: number
+    exactMatchCount: number
+    exactMatchRate: number
+    levelMatchCount: number
+    levelMatchRate: number
+  }>
+  byAnnotator: Record<string, {
+    total: number
+    hardMatchCount: number
+    hardMatchRate: number
+    avgLevelMatchRate: number
+  }>
+  mismatchedSamples: QAScoreSampleResult[]  // Samples that don't hard match
+}
+
+/**
+ * Union type for QA stats
+ */
+export type QAStats = QAPairStats | QAScoreStats

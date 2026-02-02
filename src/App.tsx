@@ -9,7 +9,8 @@ import {
   AnalysisDashboard, 
   AnalysisResults, 
   AnalysisModels, 
-  AnalysisConsistency 
+  AnalysisConsistency,
+  AnalysisQA,
 } from './pages/analysis'
 import type { PairSample, ScoreSample } from './types'
 
@@ -58,6 +59,7 @@ function App() {
           <Route path="results" element={<AnalysisResults />} />
           <Route path="models" element={<AnalysisModels />} />
           <Route path="consistency" element={<AnalysisConsistency />} />
+          <Route path="qa" element={<AnalysisQA />} />
         </Route>
       </Routes>
     </BrowserRouter>
