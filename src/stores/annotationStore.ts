@@ -31,6 +31,18 @@ function inferProblemLevel(majorReason: string, minorReason: string): ProblemLev
   return 'none'
 }
 
+// Sample status type for the progress grid
+export type SampleStatus = 'completed' | 'doubtful' | 'pending'
+
+// Draft data structure for saving incomplete annotations
+interface DraftData {
+  checklist: ChecklistState
+  pairDraft?: Record<Dimension, DimensionPairDraft>
+  scoreDraft?: {
+    scores: Record<Dimension, { score: number; major_reason: string; minor_reason: string }>
+  }
+}
+
 interface AnnotationState {
   // Task data
   taskPackage: TaskPackage | null
@@ -38,6 +50,12 @@ interface AnnotationState {
   
   // Annotation results
   results: Map<string, AnnotationResult>
+  
+  // Doubtful samples tracking
+  doubtfulSamples: Set<string>
+  
+  // Drafts for incomplete annotations (saved when marking as doubtful or navigating away)
+  drafts: Map<string, DraftData>
   
   // Current annotation state (working draft)
   currentChecklist: ChecklistState
@@ -77,8 +95,18 @@ interface AnnotationState {
   // Save current annotation
   saveCurrentAnnotation: () => boolean
   
-  // Get completion stats
-  getCompletionStats: () => { completed: number; total: number }
+  // Save current draft (for incomplete annotations)
+  saveDraft: () => void
+  
+  // Doubtful actions
+  markAsDoubtful: () => void
+  removeDoubt: (sampleId: string) => void
+  
+  // Get completion stats (now includes doubtful count)
+  getCompletionStats: () => { completed: number; doubtful: number; total: number }
+  
+  // Get sample status by index
+  getSampleStatus: (index: number) => SampleStatus
   
   // Check if current annotation is valid
   isCurrentAnnotationValid: () => boolean
@@ -124,6 +152,8 @@ export const useAnnotationStore = create<AnnotationState>()(
       taskPackage: null,
       currentSampleIndex: 0,
       results: new Map(),
+      doubtfulSamples: new Set(),
+      drafts: new Map(),
       currentChecklist: {},
       currentPairDraft: createEmptyPairDraft(),
       currentScoreDraft: createEmptyScoreDraft(),
@@ -134,6 +164,8 @@ export const useAnnotationStore = create<AnnotationState>()(
           taskPackage: pkg,
           currentSampleIndex: 0,
           results: new Map(),
+          doubtfulSamples: new Set(),
+          drafts: new Map(),
           currentChecklist: {},
           currentPairDraft: createEmptyPairDraft(),
           currentScoreDraft: createEmptyScoreDraft(),
@@ -145,6 +177,8 @@ export const useAnnotationStore = create<AnnotationState>()(
           taskPackage: null,
           currentSampleIndex: 0,
           results: new Map(),
+          doubtfulSamples: new Set(),
+          drafts: new Map(),
           currentChecklist: {},
           currentPairDraft: createEmptyPairDraft(),
           currentScoreDraft: createEmptyScoreDraft(),
@@ -153,14 +187,16 @@ export const useAnnotationStore = create<AnnotationState>()(
       
       // Navigation
       goToSample: (index) => {
-        const { taskPackage, results } = get()
+        const { taskPackage, results, drafts } = get()
         if (!taskPackage || index < 0 || index >= taskPackage.samples.length) return
         
         const sample = taskPackage.samples[index]
         const existingResult = results.get(sample.sample_id)
+        const existingDraft = drafts.get(sample.sample_id)
         
-        // Load existing result if available
+        // Priority: 1. Completed result, 2. Draft, 3. Empty
         if (existingResult) {
+          // Load from completed result
           if (taskPackage.mode === 'pair') {
             const pairResult = existingResult as PairAnnotationResult
             const pairDraft = createEmptyPairDraft()
@@ -192,6 +228,14 @@ export const useAnnotationStore = create<AnnotationState>()(
               currentScoreDraft: { scores: scoreResult.scores },
             })
           }
+        } else if (existingDraft) {
+          // Load from draft (incomplete annotation)
+          set({
+            currentSampleIndex: index,
+            currentChecklist: existingDraft.checklist,
+            currentPairDraft: existingDraft.pairDraft || createEmptyPairDraft(),
+            currentScoreDraft: existingDraft.scoreDraft || createEmptyScoreDraft(),
+          })
         } else {
           // Reset to empty draft
           set({
@@ -362,7 +406,7 @@ export const useAnnotationStore = create<AnnotationState>()(
       // Save
       saveCurrentAnnotation: () => {
         const state = get()
-        const { taskPackage, currentSampleIndex, currentChecklist, currentPairDraft, currentScoreDraft, results } = state
+        const { taskPackage, currentSampleIndex, currentChecklist, currentPairDraft, currentScoreDraft, results, drafts, doubtfulSamples } = state
         
         if (!taskPackage) return false
         if (!state.isCurrentAnnotationValid()) return false
@@ -371,6 +415,13 @@ export const useAnnotationStore = create<AnnotationState>()(
         const now = new Date().toISOString()
         
         const newResults = new Map(results)
+        const newDrafts = new Map(drafts)
+        const newDoubtfulSamples = new Set(doubtfulSamples)
+        
+        // Clear draft for this sample since it's now complete
+        newDrafts.delete(sample.sample_id)
+        // Also remove from doubtful if it was marked
+        newDoubtfulSamples.delete(sample.sample_id)
         
         if (taskPackage.mode === 'pair') {
           const dimensions: Record<Dimension, DimensionPairAnnotation> = {} as Record<Dimension, DimensionPairAnnotation>
@@ -414,18 +465,104 @@ export const useAnnotationStore = create<AnnotationState>()(
           newResults.set(sample.sample_id, result)
         }
         
-        set({ results: newResults })
+        set({ results: newResults, drafts: newDrafts, doubtfulSamples: newDoubtfulSamples })
         return true
       },
       
-      // Stats
+      // Save current draft (for incomplete annotations)
+      saveDraft: () => {
+        const { taskPackage, currentSampleIndex, currentChecklist, currentPairDraft, currentScoreDraft, drafts } = get()
+        if (!taskPackage) return
+        
+        const sample = taskPackage.samples[currentSampleIndex]
+        const newDrafts = new Map(drafts)
+        
+        // Check if there's any content to save
+        let hasContent = false
+        if (taskPackage.mode === 'pair') {
+          for (const dim of DIMENSIONS) {
+            const draft = currentPairDraft[dim]
+            if (draft.comparison || draft.video_a_major_reason || draft.video_a_minor_reason || 
+                draft.video_b_major_reason || draft.video_b_minor_reason) {
+              hasContent = true
+              break
+            }
+          }
+        } else {
+          for (const dim of DIMENSIONS) {
+            if (currentScoreDraft.scores[dim].score > 0 || 
+                currentScoreDraft.scores[dim].major_reason || 
+                currentScoreDraft.scores[dim].minor_reason) {
+              hasContent = true
+              break
+            }
+          }
+        }
+        
+        // Also check checklist
+        if (Object.values(currentChecklist).some(v => v)) {
+          hasContent = true
+        }
+        
+        if (hasContent) {
+          newDrafts.set(sample.sample_id, {
+            checklist: { ...currentChecklist },
+            pairDraft: taskPackage.mode === 'pair' ? JSON.parse(JSON.stringify(currentPairDraft)) : undefined,
+            scoreDraft: taskPackage.mode === 'score' ? JSON.parse(JSON.stringify(currentScoreDraft)) : undefined,
+          })
+          set({ drafts: newDrafts })
+        }
+      },
+      
+      // Doubtful actions
+      markAsDoubtful: () => {
+        const { taskPackage, currentSampleIndex, doubtfulSamples } = get()
+        if (!taskPackage) return
+        
+        // Save current draft before navigating away
+        get().saveDraft()
+        
+        const sample = taskPackage.samples[currentSampleIndex]
+        const newDoubtfulSamples = new Set(doubtfulSamples)
+        newDoubtfulSamples.add(sample.sample_id)
+        
+        set({ doubtfulSamples: newDoubtfulSamples })
+        
+        // Auto-navigate to next sample
+        if (currentSampleIndex < taskPackage.samples.length - 1) {
+          get().goToSample(currentSampleIndex + 1)
+        }
+      },
+      
+      removeDoubt: (sampleId) => {
+        const { doubtfulSamples } = get()
+        const newDoubtfulSamples = new Set(doubtfulSamples)
+        newDoubtfulSamples.delete(sampleId)
+        set({ doubtfulSamples: newDoubtfulSamples })
+      },
+      
+      // Stats (now includes doubtful count)
       getCompletionStats: () => {
-        const { taskPackage, results } = get()
-        if (!taskPackage) return { completed: 0, total: 0 }
+        const { taskPackage, results, doubtfulSamples } = get()
+        if (!taskPackage) return { completed: 0, doubtful: 0, total: 0 }
         return {
           completed: results.size,
+          doubtful: doubtfulSamples.size,
           total: taskPackage.samples.length,
         }
+      },
+      
+      // Get sample status by index
+      getSampleStatus: (index) => {
+        const { taskPackage, results, doubtfulSamples } = get()
+        if (!taskPackage || index < 0 || index >= taskPackage.samples.length) {
+          return 'pending'
+        }
+        
+        const sampleId = taskPackage.samples[index].sample_id
+        if (results.has(sampleId)) return 'completed'
+        if (doubtfulSamples.has(sampleId)) return 'doubtful'
+        return 'pending'
       },
       
       // Export
@@ -472,8 +609,8 @@ export const useAnnotationStore = create<AnnotationState>()(
       },
     }),
     {
-      name: 'annotation-storage-v3', // Version bump for major/minor reason split
-      // Custom serialization for Map
+      name: 'annotation-storage-v5', // Version bump for drafts feature
+      // Custom serialization for Map and Set
       storage: {
         getItem: (name) => {
           try {
@@ -483,12 +620,26 @@ export const useAnnotationStore = create<AnnotationState>()(
             if (parsed.state?.results) {
               parsed.state.results = new Map(Object.entries(parsed.state.results))
             }
+            // Convert doubtfulSamples array back to Set
+            if (parsed.state?.doubtfulSamples) {
+              parsed.state.doubtfulSamples = new Set(parsed.state.doubtfulSamples)
+            } else {
+              parsed.state.doubtfulSamples = new Set()
+            }
+            // Convert drafts object back to Map
+            if (parsed.state?.drafts) {
+              parsed.state.drafts = new Map(Object.entries(parsed.state.drafts))
+            } else {
+              parsed.state.drafts = new Map()
+            }
             // Validate that currentPairDraft has the new structure with major/minor reasons
             if (parsed.state?.currentPairDraft?.text_consistency && 
                 !('video_a_major_reason' in parsed.state.currentPairDraft.text_consistency)) {
               // Old format detected (v2), clear it
               console.warn('Old annotation data format (v2) detected, resetting...')
               localStorage.removeItem(name)
+              localStorage.removeItem('annotation-storage-v4')
+              localStorage.removeItem('annotation-storage-v3')
               localStorage.removeItem('annotation-storage-v2')
               localStorage.removeItem('annotation-storage')
               return null
@@ -509,6 +660,12 @@ export const useAnnotationStore = create<AnnotationState>()(
                 results: value.state.results instanceof Map 
                   ? Object.fromEntries(value.state.results)
                   : value.state.results,
+                doubtfulSamples: value.state.doubtfulSamples instanceof Set
+                  ? Array.from(value.state.doubtfulSamples)
+                  : value.state.doubtfulSamples || [],
+                drafts: value.state.drafts instanceof Map
+                  ? Object.fromEntries(value.state.drafts)
+                  : value.state.drafts || {},
               },
             }
             localStorage.setItem(name, JSON.stringify(toStore))

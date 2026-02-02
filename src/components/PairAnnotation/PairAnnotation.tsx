@@ -3,7 +3,7 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Save, 
-  SkipForward,
+  HelpCircle,
   AlertTriangle,
   CheckCircle2,
   ZoomIn,
@@ -19,8 +19,8 @@ import { Checklist } from '../Checklist/Checklist'
 import { ImageModal } from '../common/ImageModal'
 import { useAnnotationStore } from '../../stores/annotationStore'
 import { DIMENSIONS, DIMENSION_LABELS, DIMENSION_DESCRIPTIONS } from '../../types'
-import { PROBLEM_TEMPLATES } from '../../utils'
-import type { PairSample, ComparisonResult, Dimension } from '../../types'
+import { PROBLEM_TEMPLATES, detectComparisonContradiction } from '../../utils'
+import type { PairSample, ComparisonResult, Dimension, ProblemLevel } from '../../types'
 import clsx from 'clsx'
 
 interface PairAnnotationProps {
@@ -39,6 +39,7 @@ export function PairAnnotation({ sample }: PairAnnotationProps) {
     saveCurrentAnnotation,
     goToNextSample,
     goToPrevSample,
+    markAsDoubtful,
     currentSampleIndex,
     taskPackage,
     isCurrentAnnotationValid,
@@ -323,12 +324,12 @@ export function PairAnnotation({ sample }: PairAnnotationProps) {
                 )}
                 
                 <button
-                  onClick={goToNextSample}
+                  onClick={markAsDoubtful}
                   disabled={isLast}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-700 hover:bg-surface-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-600/30 hover:bg-amber-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  跳过
-                  <SkipForward className="w-4 h-4" />
+                  <HelpCircle className="w-4 h-4" />
+                  存疑
                 </button>
 
                 <button
@@ -421,6 +422,21 @@ function DimensionPairPanel({
 }: DimensionPairPanelProps) {
   const templates = PROBLEM_TEMPLATES[dimension]
 
+  // Infer problem levels from reasons
+  const inferProblemLevel = (majorReason: string, minorReason: string): ProblemLevel => {
+    if (majorReason.trim()) return 'major'
+    if (minorReason.trim()) return 'minor'
+    return 'none'
+  }
+
+  const aLevel = inferProblemLevel(draft.video_a_major_reason, draft.video_a_minor_reason)
+  const bLevel = inferProblemLevel(draft.video_b_major_reason, draft.video_b_minor_reason)
+
+  // Detect contradiction when comparison is set
+  const contradiction = draft.comparison 
+    ? detectComparisonContradiction(aLevel, bLevel, draft.comparison)
+    : { hasContradiction: false, message: '' }
+
   return (
     <div className="space-y-4">
       {/* Description */}
@@ -474,6 +490,17 @@ function DimensionPairPanel({
             ))}
           </div>
         </div>
+
+        {/* Contradiction warning */}
+        {contradiction.hasContradiction && (
+          <div className="mt-3 flex items-start gap-2 p-3 bg-orange-600/15 border border-orange-500/30 rounded-lg">
+            <AlertTriangle className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-orange-300">
+              <span className="font-medium">逻辑提醒：</span>
+              {contradiction.message}
+            </p>
+          </div>
+        )}
 
         {/* Degree difference (optional) */}
         {draft.comparison && (

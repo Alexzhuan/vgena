@@ -1,5 +1,5 @@
 import { saveAs } from 'file-saver'
-import type { TaskPackage, ChecklistItem, Dimension } from '../types'
+import type { TaskPackage, ChecklistItem, Dimension, ProblemLevel, ComparisonResult } from '../types'
 
 /**
  * Format a number with leading zeros
@@ -224,4 +224,84 @@ export const PROBLEM_TEMPLATES: Record<Dimension, { major: string[]; minor: stri
       '表情轻微僵硬',
     ],
   },
+}
+
+/**
+ * Problem level severity ranking: major > minor > none
+ */
+const PROBLEM_LEVEL_SEVERITY: Record<ProblemLevel, number> = {
+  major: 2,
+  minor: 1,
+  none: 0,
+}
+
+/**
+ * Human-readable problem level labels
+ */
+const PROBLEM_LEVEL_DISPLAY: Record<ProblemLevel, string> = {
+  major: '主要问题',
+  minor: '次要问题',
+  none: '无问题',
+}
+
+/**
+ * Comparison result labels
+ */
+const COMPARISON_DISPLAY: Record<ComparisonResult, string> = {
+  'A>B': 'A 更好',
+  'A=B': '一样好',
+  'A<B': 'B 更好',
+}
+
+/**
+ * Detect logical contradiction between problem levels and comparison result
+ * 
+ * Contradiction occurs when:
+ * - A has more severe problems but is selected as better (or equal)
+ * - B has more severe problems but is selected as better (or equal)
+ * - Problem severity differs but "equal" is selected
+ */
+export function detectComparisonContradiction(
+  aLevel: ProblemLevel,
+  bLevel: ProblemLevel,
+  comparison: ComparisonResult
+): { hasContradiction: boolean; message: string } {
+  const aSeverity = PROBLEM_LEVEL_SEVERITY[aLevel]
+  const bSeverity = PROBLEM_LEVEL_SEVERITY[bLevel]
+  
+  // A has more severe problems (A is worse)
+  if (aSeverity > bSeverity) {
+    // A is worse, so B should be better (A<B is correct)
+    if (comparison === 'A>B') {
+      return {
+        hasContradiction: true,
+        message: `视频 A 有${PROBLEM_LEVEL_DISPLAY[aLevel]}，视频 B ${bLevel === 'none' ? '无问题' : `有${PROBLEM_LEVEL_DISPLAY[bLevel]}`}，但选择了 ${COMPARISON_DISPLAY[comparison]}`,
+      }
+    }
+    if (comparison === 'A=B') {
+      return {
+        hasContradiction: true,
+        message: `视频 A 有${PROBLEM_LEVEL_DISPLAY[aLevel]}，视频 B ${bLevel === 'none' ? '无问题' : `有${PROBLEM_LEVEL_DISPLAY[bLevel]}`}，但选择了 ${COMPARISON_DISPLAY[comparison]}`,
+      }
+    }
+  }
+  
+  // B has more severe problems (B is worse)
+  if (bSeverity > aSeverity) {
+    // B is worse, so A should be better (A>B is correct)
+    if (comparison === 'A<B') {
+      return {
+        hasContradiction: true,
+        message: `视频 A ${aLevel === 'none' ? '无问题' : `有${PROBLEM_LEVEL_DISPLAY[aLevel]}`}，视频 B 有${PROBLEM_LEVEL_DISPLAY[bLevel]}，但选择了 ${COMPARISON_DISPLAY[comparison]}`,
+      }
+    }
+    if (comparison === 'A=B') {
+      return {
+        hasContradiction: true,
+        message: `视频 A ${aLevel === 'none' ? '无问题' : `有${PROBLEM_LEVEL_DISPLAY[aLevel]}`}，视频 B 有${PROBLEM_LEVEL_DISPLAY[bLevel]}，但选择了 ${COMPARISON_DISPLAY[comparison]}`,
+      }
+    }
+  }
+  
+  return { hasContradiction: false, message: '' }
 }

@@ -3,7 +3,7 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Save, 
-  SkipForward,
+  HelpCircle,
   AlertTriangle,
   CheckCircle2,
   ZoomIn,
@@ -33,6 +33,7 @@ export function ScoreAnnotation({ sample }: ScoreAnnotationProps) {
     saveCurrentAnnotation,
     goToNextSample,
     goToPrevSample,
+    markAsDoubtful,
     currentSampleIndex,
     taskPackage,
     isCurrentAnnotationValid,
@@ -308,12 +309,12 @@ export function ScoreAnnotation({ sample }: ScoreAnnotationProps) {
                 )}
                 
                 <button
-                  onClick={goToNextSample}
+                  onClick={markAsDoubtful}
                   disabled={isLast}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-700 hover:bg-surface-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-600/30 hover:bg-amber-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  跳过
-                  <SkipForward className="w-4 h-4" />
+                  <HelpCircle className="w-4 h-4" />
+                  存疑
                 </button>
 
                 <button
