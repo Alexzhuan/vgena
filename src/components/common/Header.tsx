@@ -11,7 +11,6 @@ import {
   ChevronDown,
   Check,
   HelpCircle,
-  Circle,
 } from 'lucide-react'
 import clsx from 'clsx'
 
