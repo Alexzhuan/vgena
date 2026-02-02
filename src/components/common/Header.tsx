@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useAnnotationStore } from '../../stores/annotationStore'
 import type { SampleStatus } from '../../stores/annotationStore'
 import { downloadJSON } from '../../utils'
+import { ConfirmDialog } from './ConfirmDialog'
 import { 
   Download, 
   FolderOpen, 
@@ -11,6 +13,7 @@ import {
   ChevronDown,
   Check,
   HelpCircle,
+  BarChart3,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -31,6 +34,7 @@ export function Header() {
 
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const [filterTab, setFilterTab] = useState<FilterTab>('all')
+  const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
 
   const stats = getCompletionStats()
@@ -61,6 +65,27 @@ export function Header() {
   const handleSampleClick = (index: number) => {
     goToSample(index)
     setIsPanelOpen(false)
+  }
+
+  const handleCloseTask = () => {
+    setIsCloseDialogOpen(true)
+  }
+
+  const handleConfirmClose = () => {
+    setIsCloseDialogOpen(false)
+    clearTaskPackage()
+  }
+
+  const handleCancelClose = () => {
+    setIsCloseDialogOpen(false)
+  }
+
+  const getCloseDialogMessage = () => {
+    const hasUnsaved = stats.completed < stats.total
+    if (hasUnsaved) {
+      return `当前任务尚有 ${stats.total - stats.completed} 条未完成标注。\n\n建议先导出结果再关闭，以免丢失标注进度。`
+    }
+    return '确定要关闭当前任务吗？'
   }
 
   // Get filtered sample indices based on selected tab
@@ -293,6 +318,14 @@ export function Header() {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
+            <Link
+              to="/analysis"
+              className="p-1.5 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200 transition-colors"
+              title="标注分析"
+            >
+              <BarChart3 className="w-5 h-5" />
+            </Link>
+            
             <button
               onClick={handleExport}
               disabled={stats.completed === 0}
@@ -303,7 +336,7 @@ export function Header() {
             </button>
             
             <button
-              onClick={clearTaskPackage}
+              onClick={handleCloseTask}
               className="p-1.5 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200 transition-colors"
               title="关闭任务"
             >
@@ -315,10 +348,29 @@ export function Header() {
 
       {/* Empty state */}
       {!taskPackage && (
-        <div className="ml-auto text-sm text-surface-500">
-          请加载任务包开始标注
+        <div className="ml-auto flex items-center gap-4">
+          <span className="text-sm text-surface-500">请加载任务包开始标注</span>
+          <Link
+            to="/analysis"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 text-surface-300 hover:text-white text-sm font-medium transition-colors"
+          >
+            <BarChart3 className="w-4 h-4" />
+            <span>标注分析</span>
+          </Link>
         </div>
       )}
+
+      {/* Close task confirmation dialog */}
+      <ConfirmDialog
+        isOpen={isCloseDialogOpen}
+        title="关闭任务"
+        message={getCloseDialogMessage()}
+        confirmText="确认关闭"
+        cancelText="取消关闭"
+        onConfirm={handleConfirmClose}
+        onCancel={handleCancelClose}
+        variant="warning"
+      />
     </header>
   )
 }

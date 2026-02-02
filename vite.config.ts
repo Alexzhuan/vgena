@@ -11,5 +11,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    // Copy index.html to 404.html for SPA routing on GitHub Pages
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+      },
+    },
+  },
+  // SPA fallback for dev server
+  preview: {
+    port: 3000,
   },
 })

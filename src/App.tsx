@@ -1,11 +1,20 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { useAnnotationStore } from './stores/annotationStore'
 import { TaskLoader } from './components/TaskLoader/TaskLoader'
 import { PairAnnotation } from './components/PairAnnotation/PairAnnotation'
 import { ScoreAnnotation } from './components/ScoreAnnotation/ScoreAnnotation'
 import { Header } from './components/common/Header'
+import { AnalysisLayout } from './components/analysis'
+import { 
+  AnalysisDashboard, 
+  AnalysisResults, 
+  AnalysisModels, 
+  AnalysisConsistency 
+} from './pages/analysis'
 import type { PairSample, ScoreSample } from './types'
 
-function App() {
+// Annotation Platform Home Page
+function AnnotationHome() {
   const { taskPackage, currentSampleIndex } = useAnnotationStore()
 
   // No task loaded - show task loader
@@ -33,6 +42,25 @@ function App() {
         )}
       </main>
     </div>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter basename="/vgena">
+      <Routes>
+        {/* Annotation Platform */}
+        <Route path="/" element={<AnnotationHome />} />
+        
+        {/* Analysis Dashboard */}
+        <Route path="/analysis" element={<AnalysisLayout />}>
+          <Route index element={<AnalysisDashboard />} />
+          <Route path="results" element={<AnalysisResults />} />
+          <Route path="models" element={<AnalysisModels />} />
+          <Route path="consistency" element={<AnalysisConsistency />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   )
 }
 

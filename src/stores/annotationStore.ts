@@ -34,6 +34,30 @@ function inferProblemLevel(majorReason: string, minorReason: string): ProblemLev
 // Sample status type for the progress grid
 export type SampleStatus = 'completed' | 'doubtful' | 'pending'
 
+// Draft data structure for export (same as DraftData but JSON-serializable)
+interface ExportedDraft {
+  checklist: ChecklistState
+  pairDraft?: Record<Dimension, DimensionPairDraft>
+  scoreDraft?: {
+    scores: Record<Dimension, { score: number; major_reason: string; minor_reason: string }>
+  }
+}
+
+// Exported results structure (for rework import)
+export interface ExportedResults {
+  task_id: string
+  annotator_id: string
+  mode: 'pair' | 'score'
+  total_samples: number
+  completed_samples: number
+  doubtful_samples?: number
+  doubtful_sample_ids?: string[]
+  drafts?: Record<string, ExportedDraft>
+  exported_at: string
+  task_package: TaskPackage
+  results: AnnotationResult[]
+}
+
 // Draft data structure for saving incomplete annotations
 interface DraftData {
   checklist: ChecklistState
@@ -70,6 +94,7 @@ interface AnnotationState {
   
   // Actions
   loadTaskPackage: (pkg: TaskPackage) => void
+  loadExportedResults: (exported: ExportedResults) => void
   clearTaskPackage: () => void
   
   goToSample: (index: number) => void
@@ -170,6 +195,47 @@ export const useAnnotationStore = create<AnnotationState>()(
           currentPairDraft: createEmptyPairDraft(),
           currentScoreDraft: createEmptyScoreDraft(),
         })
+      },
+      
+      // Load exported results for rework
+      loadExportedResults: (exported) => {
+        const { task_package, results, doubtful_sample_ids, drafts: exportedDrafts } = exported
+        
+        // Convert results array to Map
+        const resultsMap = new Map<string, AnnotationResult>()
+        for (const result of results) {
+          resultsMap.set(result.sample_id, result)
+        }
+        
+        // Restore doubtful samples - ensure it's a proper Set
+        const doubtfulArray = Array.isArray(doubtful_sample_ids) ? doubtful_sample_ids : []
+        const doubtfulSet = new Set<string>(doubtfulArray)
+        
+        // Restore drafts - convert object to Map
+        const draftsMap = new Map<string, DraftData>()
+        if (exportedDrafts && typeof exportedDrafts === 'object') {
+          for (const [key, value] of Object.entries(exportedDrafts)) {
+            draftsMap.set(key, value as DraftData)
+          }
+        }
+        
+        // Set state with restored data
+        set({
+          taskPackage: task_package,
+          currentSampleIndex: 0,
+          results: resultsMap,
+          doubtfulSamples: doubtfulSet,
+          drafts: draftsMap,
+          currentChecklist: {},
+          currentPairDraft: createEmptyPairDraft(),
+          currentScoreDraft: createEmptyScoreDraft(),
+        })
+        
+        // Navigate to first sample to load its data if already annotated
+        const firstSample = task_package.samples[0]
+        if (firstSample && resultsMap.has(firstSample.sample_id)) {
+          get().goToSample(0)
+        }
       },
       
       clearTaskPackage: () => {
@@ -567,7 +633,7 @@ export const useAnnotationStore = create<AnnotationState>()(
       
       // Export
       exportResults: () => {
-        const { taskPackage, results } = get()
+        const { taskPackage, results, doubtfulSamples, drafts } = get()
         if (!taskPackage) return '{}'
         
         // Create a map of sample_id to sample for quick lookup
@@ -595,13 +661,24 @@ export const useAnnotationStore = create<AnnotationState>()(
           return result
         })
         
+        // Convert drafts Map to object for export
+        const draftsObject: Record<string, DraftData> = {}
+        drafts.forEach((value, key) => {
+          draftsObject[key] = value
+        })
+        
         const exportData = {
           task_id: taskPackage.task_id,
           annotator_id: taskPackage.annotator_id,
           mode: taskPackage.mode,
           total_samples: taskPackage.samples.length,
           completed_samples: results.size,
+          doubtful_samples: doubtfulSamples.size,
+          doubtful_sample_ids: Array.from(doubtfulSamples),
+          drafts: draftsObject,
           exported_at: new Date().toISOString(),
+          // Include full task package for rework support
+          task_package: taskPackage,
           results: resultsWithModel,
         }
         

@@ -2,6 +2,9 @@
 // Core Types for Video Annotation Platform
 // ============================================
 
+// Re-export analysis types
+export * from './analysis'
+
 /**
  * Annotation mode types
  */

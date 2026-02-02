@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Video Annotation Platform</title>
+  <script>
+    // SPA redirect for GitHub Pages
+    // Store the current path in sessionStorage and redirect to index
+    sessionStorage.redirect = location.href;
+    location.replace(location.pathname.split('/').slice(0, 2).join('/') + '/');
+  </script>
+</head>
+<body>
+  <noscript>
+    <p>This app requires JavaScript to run.</p>
+  </noscript>
+</body>
+</html>

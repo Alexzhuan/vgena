@@ -1,5 +1,6 @@
 import { saveAs } from 'file-saver'
 import type { TaskPackage, ChecklistItem, Dimension, ProblemLevel, ComparisonResult } from '../types'
+import type { ExportedResults } from '../stores/annotationStore'
 
 /**
  * Format a number with leading zeros
@@ -55,6 +56,48 @@ export function parseTaskPackage(jsonString: string): TaskPackage {
   }
   
   return parsed as TaskPackage
+}
+
+/**
+ * Check if the JSON is an exported results file (for rework)
+ */
+export function isExportedResults(parsed: unknown): parsed is ExportedResults {
+  if (typeof parsed !== 'object' || parsed === null) return false
+  const obj = parsed as Record<string, unknown>
+  return (
+    'task_package' in obj &&
+    'results' in obj &&
+    Array.isArray(obj.results) &&
+    typeof obj.task_package === 'object'
+  )
+}
+
+/**
+ * Parse exported results from JSON string (for rework)
+ */
+export function parseExportedResults(jsonString: string): ExportedResults {
+  const parsed = JSON.parse(jsonString)
+  
+  // Validate it's an exported results file
+  if (!isExportedResults(parsed)) {
+    throw new Error('Invalid exported results format: missing task_package or results')
+  }
+  
+  // Validate the embedded task package
+  const taskPackage = parsed.task_package
+  if (!taskPackage.task_id || !taskPackage.annotator_id || !taskPackage.mode || !taskPackage.samples) {
+    throw new Error('Invalid exported results: embedded task_package is malformed')
+  }
+  
+  if (taskPackage.mode !== 'pair' && taskPackage.mode !== 'score') {
+    throw new Error('Invalid exported results: mode must be "pair" or "score"')
+  }
+  
+  if (!Array.isArray(taskPackage.samples) || taskPackage.samples.length === 0) {
+    throw new Error('Invalid exported results: samples must be a non-empty array')
+  }
+  
+  return parsed
 }
 
 /**

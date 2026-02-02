@@ -1,17 +1,18 @@
 import { useState, useCallback, useRef } from 'react'
-import { Upload, FileJson, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
+import { Upload, FileJson, AlertCircle, CheckCircle2, Loader2, RotateCcw } from 'lucide-react'
 import { useAnnotationStore } from '../../stores/annotationStore'
-import { parseTaskPackage, readFileAsText } from '../../utils'
+import { parseTaskPackage, readFileAsText, isExportedResults, parseExportedResults } from '../../utils'
 import clsx from 'clsx'
 
 export function TaskLoader() {
-  const { loadTaskPackage } = useAnnotationStore()
+  const { loadTaskPackage, loadExportedResults } = useAnnotationStore()
   const fileInputRef = useRef<HTMLInputElement>(null)
   
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState<string>('任务加载成功！')
 
   const handleFile = useCallback(async (file: File) => {
     if (!file.name.endsWith('.json')) {
@@ -24,18 +25,41 @@ export function TaskLoader() {
     
     try {
       const content = await readFileAsText(file)
-      const taskPackage = parseTaskPackage(content)
+      const parsed = JSON.parse(content)
       
-      setSuccess(true)
-      setTimeout(() => {
-        loadTaskPackage(taskPackage)
-      }, 500)
+      // Check if this is an exported results file (for rework)
+      if (isExportedResults(parsed)) {
+        const exportedResults = parseExportedResults(content)
+        const doubtfulCount = exportedResults.doubtful_sample_ids?.length || 0
+        const completedCount = exportedResults.completed_samples
+        const draftsCount = exportedResults.drafts ? Object.keys(exportedResults.drafts).length : 0
+        let message = `返工模式：已恢复 ${completedCount} 条标注结果`
+        if (doubtfulCount > 0) {
+          message += `，${doubtfulCount} 条存疑`
+        }
+        if (draftsCount > 0) {
+          message += `，${draftsCount} 条草稿`
+        }
+        setSuccessMessage(message)
+        setSuccess(true)
+        setTimeout(() => {
+          loadExportedResults(exportedResults)
+        }, 500)
+      } else {
+        // Regular task package
+        const taskPackage = parseTaskPackage(content)
+        setSuccessMessage('任务加载成功！')
+        setSuccess(true)
+        setTimeout(() => {
+          loadTaskPackage(taskPackage)
+        }, 500)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '文件解析失败')
     } finally {
       setIsLoading(false)
     }
-  }, [loadTaskPackage])
+  }, [loadTaskPackage, loadExportedResults])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -125,7 +149,7 @@ export function TaskLoader() {
         </div>
         <h1 className="text-2xl font-bold mb-2">加载标注任务</h1>
         <p className="text-surface-400">
-          上传 JSON 格式的任务包文件开始标注工作
+          上传 JSON 格式的任务包文件开始标注工作，或加载已导出的结果进行返工
         </p>
       </div>
 
@@ -159,8 +183,12 @@ export function TaskLoader() {
           </div>
         ) : success ? (
           <div className="flex flex-col items-center gap-3">
-            <CheckCircle2 className="w-12 h-12 text-success" />
-            <span className="text-success font-medium">任务加载成功！</span>
+            {successMessage.includes('返工') ? (
+              <RotateCcw className="w-12 h-12 text-success" />
+            ) : (
+              <CheckCircle2 className="w-12 h-12 text-success" />
+            )}
+            <span className="text-success font-medium">{successMessage}</span>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center gap-3">
@@ -189,7 +217,7 @@ export function TaskLoader() {
               <span className="text-surface-500"> 或拖拽到此处</span>
             </div>
             <span className="text-sm text-surface-500">
-              支持 .json 格式的任务包文件
+              支持任务包或已导出的标注结果文件
             </span>
           </div>
         )}
