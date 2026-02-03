@@ -351,11 +351,12 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         src={src}
-        className="w-full h-full object-contain"
+        className="w-full h-full object-contain cursor-pointer"
         muted={isMuted}
         loop
         playsInline
         preload="auto"
+        onClick={togglePlay}
       />
 
       {/* Loading overlay - hide during drag for smoother scrubbing (like Chrome native player) */}
@@ -372,12 +373,9 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* Clickable video area - click to toggle play/pause */}
+      {/* Overlay to prevent native video controls - pointer-events-none allows click/right-click to reach video */}
       {!isLoading && !error && (
-        <div 
-          className="absolute inset-0 cursor-pointer z-10" 
-          onClick={togglePlay}
-        />
+        <div className="absolute inset-0 pointer-events-none z-10" />
       )}
 
       {/* Controls - appear on hover - z-20 ensures controls are above click layer */}

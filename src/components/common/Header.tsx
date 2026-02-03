@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useAnnotationStore } from '../../stores/annotationStore'
 import type { SampleStatus } from '../../stores/annotationStore'
@@ -14,6 +14,8 @@ import {
   Check,
   HelpCircle,
   BarChart3,
+  Search,
+  X,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -35,7 +37,9 @@ export function Header() {
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const [filterTab, setFilterTab] = useState<FilterTab>('all')
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const panelRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const stats = getCompletionStats()
 
@@ -54,6 +58,52 @@ export function Header() {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [isPanelOpen])
+
+  // Focus search input when panel opens
+  useEffect(() => {
+    if (isPanelOpen && searchInputRef.current) {
+      // Small delay to ensure panel is rendered
+      setTimeout(() => searchInputRef.current?.focus(), 50)
+    }
+  }, [isPanelOpen])
+
+  // Open panel and focus search with keyboard shortcut
+  const openPanelWithSearch = useCallback(() => {
+    setIsPanelOpen(true)
+    // Focus will be handled by the useEffect above
+  }, [])
+
+  // Keyboard shortcut: Ctrl/Cmd + K to open search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if in input/textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        // Allow Escape to close panel even in search input
+        if (e.key === 'Escape' && isPanelOpen) {
+          setIsPanelOpen(false)
+          setSearchQuery('')
+        }
+        return
+      }
+
+      // Ctrl/Cmd + K to open search panel
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        if (taskPackage) {
+          openPanelWithSearch()
+        }
+      }
+
+      // Escape to close panel
+      if (e.key === 'Escape' && isPanelOpen) {
+        setIsPanelOpen(false)
+        setSearchQuery('')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isPanelOpen, taskPackage, openPanelWithSearch])
 
   const handleExport = () => {
     if (!taskPackage) return
@@ -88,20 +138,64 @@ export function Header() {
     return '确定要关闭当前任务吗？'
   }
 
-  // Get filtered sample indices based on selected tab
+  // Get sample_id for a given index
+  const getSampleId = (index: number): string => {
+    if (!taskPackage || index < 0 || index >= taskPackage.samples.length) return ''
+    return taskPackage.samples[index].sample_id
+  }
+
+  // Check if sample_id matches search query (case-insensitive fuzzy match)
+  const matchesSearch = (sampleId: string): boolean => {
+    if (!searchQuery.trim()) return true
+    return sampleId.toLowerCase().includes(searchQuery.toLowerCase().trim())
+  }
+
+  // Get filtered sample indices based on selected tab AND search query
   const getFilteredIndices = (): number[] => {
     if (!taskPackage) return []
     
     const indices: number[] = []
     for (let i = 0; i < taskPackage.samples.length; i++) {
       const status = getSampleStatus(i)
-      if (filterTab === 'all') {
-        indices.push(i)
-      } else if (filterTab === status) {
+      const sampleId = getSampleId(i)
+      
+      // First filter by status tab
+      const matchesStatus = filterTab === 'all' || filterTab === status
+      
+      // Then filter by search query
+      const matchesSearchQuery = matchesSearch(sampleId)
+      
+      if (matchesStatus && matchesSearchQuery) {
         indices.push(i)
       }
     }
     return indices
+  }
+
+  // Handle search input change
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value)
+  }
+
+  // Clear search
+  const clearSearch = () => {
+    setSearchQuery('')
+    searchInputRef.current?.focus()
+  }
+
+  // Handle Enter key in search to jump to first result
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const filtered = getFilteredIndices()
+      if (filtered.length > 0) {
+        handleSampleClick(filtered[0])
+      }
+    }
+    if (e.key === 'Escape') {
+      setIsPanelOpen(false)
+      setSearchQuery('')
+    }
   }
 
   // Count samples by status
@@ -238,6 +332,38 @@ export function Header() {
             {/* Progress Grid Panel */}
             {isPanelOpen && (
               <div className="absolute top-full right-0 mt-2 w-96 bg-surface-800 border border-surface-600 rounded-xl shadow-xl z-50 overflow-hidden">
+                {/* Search Box */}
+                <div className="p-3 border-b border-surface-700">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" />
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={searchQuery}
+                      onChange={handleSearchChange}
+                      onKeyDown={handleSearchKeyDown}
+                      placeholder="搜索 sample_id..."
+                      className="w-full pl-9 pr-8 py-2 bg-surface-900 border border-surface-600 rounded-lg text-sm
+                                 placeholder:text-surface-500 focus:border-accent-500 focus:ring-1 focus:ring-accent-500 
+                                 transition-colors outline-none"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={clearSearch}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-surface-700 text-surface-400 hover:text-surface-200 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {searchQuery && (
+                    <div className="mt-2 text-xs text-surface-500">
+                      找到 <span className="text-accent-400 font-medium">{filteredIndices.length}</span> 个匹配结果
+                      {filteredIndices.length > 0 && <span className="ml-1">• 按 Enter 跳转到第一个</span>}
+                    </div>
+                  )}
+                </div>
+
                 {/* Filter Tabs */}
                 <div className="flex border-b border-surface-700">
                   {[
@@ -286,19 +412,25 @@ export function Header() {
                 <div className="max-h-48 overflow-y-auto p-3">
                   {filteredIndices.length === 0 ? (
                     <div className="text-center text-surface-500 py-4 text-sm">
-                      暂无{filterTab === 'completed' ? '已完成' : filterTab === 'doubtful' ? '存疑' : filterTab === 'pending' ? '未完成' : ''}样本
+                      {searchQuery ? (
+                        <>未找到匹配 "<span className="text-accent-400">{searchQuery}</span>" 的样本</>
+                      ) : (
+                        <>暂无{filterTab === 'completed' ? '已完成' : filterTab === 'doubtful' ? '存疑' : filterTab === 'pending' ? '未完成' : ''}样本</>
+                      )}
                     </div>
                   ) : (
                     <div className="grid grid-cols-10 gap-1.5">
                       {filteredIndices.map((index) => {
                         const status = getSampleStatus(index)
+                        const sampleId = getSampleId(index)
                         const isCurrent = index === currentSampleIndex
+                        const statusLabel = status === 'completed' ? '已完成' : status === 'doubtful' ? '存疑' : '未完成'
                         return (
                           <button
                             key={index}
                             onClick={() => handleSampleClick(index)}
                             className={getStatusStyle(status, isCurrent)}
-                            title={`样本 ${index + 1} - ${status === 'completed' ? '已完成' : status === 'doubtful' ? '存疑' : '未完成'}`}
+                            title={`#${index + 1} | ${sampleId}\n状态: ${statusLabel}`}
                           >
                             {index + 1}
                           </button>
@@ -309,8 +441,9 @@ export function Header() {
                 </div>
 
                 {/* Quick Stats Footer */}
-                <div className="px-3 py-2 border-t border-surface-700 bg-surface-850 text-xs text-surface-500">
-                  点击样本编号可快速跳转
+                <div className="px-3 py-2 border-t border-surface-700 bg-surface-850 text-xs text-surface-500 flex items-center justify-between">
+                  <span>悬停查看 sample_id • 点击跳转</span>
+                  <kbd className="px-1.5 py-0.5 bg-surface-700 rounded text-surface-400 font-mono">⌘K</kbd>
                 </div>
               </div>
             )}
