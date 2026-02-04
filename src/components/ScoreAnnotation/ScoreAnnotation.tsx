@@ -81,8 +81,8 @@ export function ScoreAnnotation({ sample }: ScoreAnnotationProps) {
       return s >= 3
     }
     if (hasMinorReason) {
-      // Only minor issues noted -> cannot select 1, 2
-      return s <= 2
+      // Only minor issues noted -> cannot select 1, 2, 5
+      return s <= 2 || s === 5
     }
     return false
   }
@@ -448,8 +448,8 @@ function DimensionScorePanel({
       return s >= 3
     }
     if (hasMinorReason) {
-      // Only minor issues noted -> cannot select 1, 2
-      return s <= 2
+      // Only minor issues noted -> cannot select 1, 2, 5
+      return s <= 2 || s === 5
     }
     return false
   }
@@ -458,8 +458,8 @@ function DimensionScorePanel({
     if (hasMajorReason && s >= 3) {
       return '已填写主要问题，不可选择3-5分'
     }
-    if (!hasMajorReason && hasMinorReason && s <= 2) {
-      return '仅填写次要问题，不可选择1-2分'
+    if (!hasMajorReason && hasMinorReason && (s <= 2 || s === 5)) {
+      return '仅填写次要问题，不可选择1、2、5分'
     }
     return undefined
   }
