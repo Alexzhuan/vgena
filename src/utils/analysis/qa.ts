@@ -56,6 +56,34 @@ export function getProblemLevelLabel(level: QAProblemLevel): string {
   }
 }
 
+/**
+ * Check if two scores are a soft match for QA purposes.
+ * 
+ * Soft match rules:
+ * - Same problem level → accept
+ * - none ↔ minor with diff=1 → accept (5-4 case)
+ * - Involving major with different level → reject (3-2 boundary)
+ * 
+ * Acceptable pairs: 5-4, 4-3, 2-1
+ * Rejected pairs: 3-2 (crosses minor→major boundary)
+ */
+function isSoftMatchScore(goldenScore: number, annotatorScore: number): boolean {
+  const goldenLevel = scoreToProblemLevel(goldenScore)
+  const annotatorLevel = scoreToProblemLevel(annotatorScore)
+
+  // Same level always matches
+  if (goldenLevel === annotatorLevel) return true
+
+  // Different levels: only accept none↔minor (not involving major)
+  // This allows 5-4 but rejects 3-2
+  if (goldenLevel === 'major' || annotatorLevel === 'major') {
+    return false
+  }
+
+  // none↔minor difference: check that score diff is exactly 1 (5-4 case)
+  return Math.abs(goldenScore - annotatorScore) === 1
+}
+
 // ============================================
 // Pair Mode QA
 // ============================================
@@ -248,7 +276,8 @@ function compareScoreSample(
     const annotatorLevel = scoreToProblemLevel(annotatorScore)
 
     const isExactMatch = goldenScore === annotatorScore
-    const isLevelMatch = goldenLevel === annotatorLevel
+    // Use new soft match logic: 5-4, 4-3, 2-1 acceptable; 3-2 not acceptable
+    const isLevelMatch = isSoftMatchScore(goldenScore, annotatorScore)
 
     if (isExactMatch) {
       exactMatchCount++
