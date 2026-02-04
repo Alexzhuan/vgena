@@ -195,6 +195,16 @@ export interface QAPairDimensionResult {
   goldenComparison: ComparisonResult
   annotatorComparison: ComparisonResult
   isMatch: boolean
+  // Golden Set reasons
+  goldenVideoAMajorReason?: string
+  goldenVideoAMinorReason?: string
+  goldenVideoBMajorReason?: string
+  goldenVideoBMinorReason?: string
+  // Annotator reasons
+  annotatorVideoAMajorReason?: string
+  annotatorVideoAMinorReason?: string
+  annotatorVideoBMajorReason?: string
+  annotatorVideoBMinorReason?: string
 }
 
 /**
@@ -228,6 +238,12 @@ export interface QAScoreDimensionResult {
   annotatorLevel: QAProblemLevel
   isExactMatch: boolean  // Score exactly equal
   isLevelMatch: boolean  // Problem level equal
+  // Golden Set reasons
+  goldenMajorReason?: string
+  goldenMinorReason?: string
+  // Annotator reasons
+  annotatorMajorReason?: string
+  annotatorMinorReason?: string
 }
 
 /**
@@ -269,7 +285,27 @@ export interface QAPairStats {
     hardMatchRate: number
     avgSoftMatchRate: number
   }>
+  allSampleResults: QAPairSampleResult[]  // All sample results for filtering
   mismatchedSamples: QAPairSampleResult[]  // Samples that don't hard match
+  dimensionMismatches: QAPairDimensionMismatch[]  // Per-dimension mismatches
+}
+
+/**
+ * Pair mode - per-dimension mismatch record (for expanded list view)
+ */
+export interface QAPairDimensionMismatch {
+  sampleId: string
+  annotatorId: string
+  dimension: Dimension
+  goldenComparison: ComparisonResult
+  annotatorComparison: ComparisonResult
+  // Sample details
+  prompt?: string
+  firstFrameUrl?: string
+  videoAUrl?: string
+  videoBUrl?: string
+  videoAModel?: string
+  videoBModel?: string
 }
 
 /**
@@ -282,8 +318,8 @@ export interface QAScoreStats {
   hardMatchRate: number
   softMatchCount: number  // Samples where all dimensions have same problem level
   softMatchRate: number
-  avgExactMatchRate: number  // Average exact score match rate
-  avgLevelMatchRate: number  // Average level match rate
+  avgExactMatchRate: number  // Average exact score match rate (Hard Match)
+  avgLevelMatchRate: number  // Average level match rate (Soft Match)
   byDimension: Record<Dimension, {
     total: number
     exactMatchCount: number
@@ -295,9 +331,32 @@ export interface QAScoreStats {
     total: number
     hardMatchCount: number
     hardMatchRate: number
+    softMatchCount: number
+    softMatchRate: number
+    avgExactMatchRate: number
     avgLevelMatchRate: number
   }>
+  allSampleResults: QAScoreSampleResult[]  // All sample results for filtering
   mismatchedSamples: QAScoreSampleResult[]  // Samples that don't hard match
+  dimensionMismatches: QAScoreDimensionMismatch[]  // Per-dimension mismatches
+}
+
+/**
+ * Score mode - per-dimension mismatch record (for expanded list view)
+ */
+export interface QAScoreDimensionMismatch {
+  sampleId: string
+  annotatorId: string
+  dimension: Dimension
+  goldenScore: number
+  annotatorScore: number
+  goldenLevel: QAProblemLevel
+  annotatorLevel: QAProblemLevel
+  // Sample details
+  prompt?: string
+  firstFrameUrl?: string
+  videoUrl?: string
+  videoModel?: string
 }
 
 /**

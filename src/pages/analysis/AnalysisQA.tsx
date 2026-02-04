@@ -8,7 +8,10 @@ import type {
   QAScoreSampleResult,
   QAPairStats,
   QAScoreStats,
+  QAScoreDimensionMismatch,
+  QAPairDimensionMismatch,
 } from '../../types/analysis'
+import type { Dimension } from '../../types'
 import { getProblemLevelLabel } from '../../utils/analysis/qa'
 import { 
   Upload, 
@@ -441,14 +444,64 @@ interface PairQAResultsProps {
 }
 
 function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, showAnnotatorTable = true }: PairQAResultsProps) {
-  const filteredMismatched = useMemo(() => {
-    if (!searchQuery.trim()) return stats.mismatchedSamples
-    const query = searchQuery.toLowerCase()
-    return stats.mismatchedSamples.filter(s => 
-      s.sampleId.toLowerCase().includes(query) ||
-      s.annotatorId.toLowerCase().includes(query)
-    )
-  }, [stats.mismatchedSamples, searchQuery])
+  const [selectedDimension, setSelectedDimension] = useState<Dimension | 'all'>('all')
+  
+  // Filter dimension mismatches based on search and dimension filter
+  const filteredDimensionMismatches = useMemo(() => {
+    let filtered = stats.dimensionMismatches
+    
+    // Filter by dimension
+    if (selectedDimension !== 'all') {
+      filtered = filtered.filter(s => s.dimension === selectedDimension)
+    }
+    
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      filtered = filtered.filter(s => 
+        s.sampleId.toLowerCase().includes(query) ||
+        s.annotatorId.toLowerCase().includes(query)
+      )
+    }
+    
+    return filtered
+  }, [stats.dimensionMismatches, selectedDimension, searchQuery])
+  
+  // Calculate per-annotator stats for selected dimension
+  const dimensionAnnotatorStats = useMemo(() => {
+    if (selectedDimension === 'all') {
+      return stats.byAnnotator
+    }
+    
+    // Calculate stats for the selected dimension
+    const annotatorMap: Record<string, { total: number; matchCount: number }> = {}
+    
+    stats.allSampleResults.forEach(sample => {
+      const annotatorId = sample.annotatorId
+      if (!annotatorMap[annotatorId]) {
+        annotatorMap[annotatorId] = { total: 0, matchCount: 0 }
+      }
+      
+      const dimResult = sample.dimensionResults.find(d => d.dimension === selectedDimension)
+      if (dimResult) {
+        annotatorMap[annotatorId].total++
+        if (dimResult.isMatch) {
+          annotatorMap[annotatorId].matchCount++
+        }
+      }
+    })
+    
+    // Convert to the same format as stats.byAnnotator
+    const result: Record<string, { total: number; avgSoftMatchRate: number }> = {}
+    Object.entries(annotatorMap).forEach(([annotatorId, data]) => {
+      result[annotatorId] = {
+        total: data.total,
+        avgSoftMatchRate: data.total > 0 ? data.matchCount / data.total : 0
+      }
+    })
+    
+    return result
+  }, [stats.allSampleResults, stats.byAnnotator, selectedDimension])
 
   return (
     <>
@@ -489,7 +542,13 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
               return (
                 <div
                   key={dim}
-                  className="bg-surface-800/50 rounded-xl p-4 border border-surface-700/50"
+                  className={clsx(
+                    'bg-surface-800/50 rounded-xl p-4 cursor-pointer transition-all border',
+                    selectedDimension === dim 
+                      ? 'ring-2 ring-accent-500 border-accent-500/50' 
+                      : 'border-surface-700/50 hover:bg-surface-800 hover:border-surface-600'
+                  )}
+                  onClick={() => setSelectedDimension(selectedDimension === dim ? 'all' : dim)}
                 >
                   <div className="text-sm text-surface-400 mb-2 font-medium">
                     {DIMENSION_LABELS[dim]}
@@ -522,10 +581,17 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
       </div>
 
       {/* Annotator Breakdown - only show when viewing all annotators */}
-      {showAnnotatorTable && Object.keys(stats.byAnnotator).length > 1 && (
+      {showAnnotatorTable && Object.keys(dimensionAnnotatorStats).length > 1 && (
         <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
           <div className="px-6 py-4 border-b border-surface-800 bg-surface-900/50">
-            <h2 className="text-lg font-semibold text-white">分标注人员统计</h2>
+            <h2 className="text-lg font-semibold text-white">
+              分标注人员统计
+              {selectedDimension !== 'all' && (
+                <span className="text-sm font-normal text-surface-400 ml-2">
+                  （{DIMENSION_LABELS[selectedDimension]}）
+                </span>
+              )}
+            </h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -533,26 +599,16 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
                 <tr className="text-left text-surface-400 text-sm border-b border-surface-800 bg-surface-900/30">
                   <th className="px-6 py-4 font-medium">标注人员</th>
                   <th className="px-6 py-4 font-medium">样本数</th>
-                  <th className="px-6 py-4 font-medium">Hard Match</th>
-                  <th className="px-6 py-4 font-medium">Hard Match 率</th>
-                  <th className="px-6 py-4 font-medium">平均维度一致率</th>
+                  <th className="px-6 py-4 font-medium">
+                    {selectedDimension === 'all' ? '平均维度一致率' : '一致率'}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800/50">
-                {Object.entries(stats.byAnnotator).map(([annotatorId, annotatorStats]) => (
+                {Object.entries(dimensionAnnotatorStats).map(([annotatorId, annotatorStats]) => (
                   <tr key={annotatorId} className="hover:bg-surface-800/30 transition-colors">
                     <td className="px-6 py-4 font-medium text-cyan-400">{annotatorId}</td>
                     <td className="px-6 py-4 text-surface-300">{annotatorStats.total}</td>
-                    <td className="px-6 py-4 text-green-400 font-medium">{annotatorStats.hardMatchCount}</td>
-                    <td className="px-6 py-4">
-                      <span className={clsx(
-                        'font-medium',
-                        annotatorStats.hardMatchRate >= 0.8 ? 'text-green-400' :
-                        annotatorStats.hardMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
-                      )}>
-                        {(annotatorStats.hardMatchRate * 100).toFixed(1)}%
-                      </span>
-                    </td>
                     <td className="px-6 py-4">
                       <span className={clsx(
                         'font-medium',
@@ -570,13 +626,18 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
         </div>
       )}
 
-      {/* Mismatched Samples */}
+      {/* Mismatched Samples - Per Dimension */}
       <div className="bg-surface-900 rounded-2xl border border-surface-800 overflow-hidden">
         <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/50 flex-wrap gap-3">
           <h2 className="text-lg font-semibold text-white">
             不一致样本列表
+            {selectedDimension !== 'all' && (
+              <span className="text-sm font-normal text-surface-400 ml-2">
+                （筛选：{DIMENSION_LABELS[selectedDimension]}）
+              </span>
+            )}
             <span className="text-sm font-normal text-surface-400 ml-2">
-              （共 {stats.mismatchedSamples.length} 条）
+              （共 {filteredDimensionMismatches.length} 条）
             </span>
           </h2>
           <div className="relative">
@@ -599,40 +660,55 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
                 <th className="px-4 py-4 font-medium">标注人员</th>
                 <th className="px-4 py-4 font-medium">Model A</th>
                 <th className="px-4 py-4 font-medium">Model B</th>
-                <th className="px-4 py-4 font-medium text-center">一致维度</th>
-                <th className="px-4 py-4 font-medium text-center">一致率</th>
+                <th className="px-4 py-4 font-medium">维度</th>
+                <th className="px-4 py-4 font-medium">Golden</th>
+                <th className="px-4 py-4 font-medium">标注</th>
                 <th className="px-4 py-4 font-medium">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-800/50">
-              {filteredMismatched.slice(0, 100).map((sample, idx) => (
-                <tr key={`${sample.sampleId}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
+              {filteredDimensionMismatches.slice(0, 100).map((item, idx) => (
+                <tr key={`${item.sampleId}-${item.dimension}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
                   <td className="px-4 py-4">
-                    <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={sample.sampleId}>
-                      {sample.sampleId}
+                    <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={item.sampleId}>
+                      {item.sampleId}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-sm text-cyan-400 font-medium">{sample.annotatorId}</td>
-                  <td className="px-4 py-4 text-sm text-accent-400">{sample.videoAModel || '-'}</td>
-                  <td className="px-4 py-4 text-sm text-orange-400">{sample.videoBModel || '-'}</td>
-                  <td className="px-4 py-4 text-center">
-                    <span className="text-lg font-bold text-white">
-                      {sample.matchedCount}/{sample.totalDimensions}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-center">
+                  <td className="px-4 py-4 text-sm text-cyan-400 font-medium">{item.annotatorId}</td>
+                  <td className="px-4 py-4 text-sm text-accent-400">{item.videoAModel || '-'}</td>
+                  <td className="px-4 py-4 text-sm text-orange-400">{item.videoBModel || '-'}</td>
+                  <td className="px-4 py-4 text-sm text-surface-200 font-medium">{DIMENSION_LABELS[item.dimension]}</td>
+                  <td className="px-4 py-4">
                     <span className={clsx(
                       'px-2.5 py-1 rounded-lg text-sm font-bold',
-                      sample.softMatchRate >= 0.8 ? 'bg-green-500/15 text-green-400' :
-                      sample.softMatchRate >= 0.6 ? 'bg-amber-500/15 text-amber-400' :
-                      'bg-red-500/15 text-red-400'
+                      item.goldenComparison === 'A>B' ? 'bg-green-500/15 text-green-400' :
+                      item.goldenComparison === 'A<B' ? 'bg-red-500/15 text-red-400' :
+                      'bg-surface-700 text-surface-400'
                     )}>
-                      {(sample.softMatchRate * 100).toFixed(0)}%
+                      {item.goldenComparison}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <span className={clsx(
+                      'px-2.5 py-1 rounded-lg text-sm font-bold',
+                      item.annotatorComparison === 'A>B' ? 'bg-green-500/15 text-green-400' :
+                      item.annotatorComparison === 'A<B' ? 'bg-red-500/15 text-red-400' :
+                      'bg-surface-700 text-surface-400'
+                    )}>
+                      {item.annotatorComparison}
                     </span>
                   </td>
                   <td className="px-4 py-4">
                     <button
-                      onClick={() => onSelectSample(sample)}
+                      onClick={() => {
+                        // Find the full sample result to show in modal
+                        const fullSample = stats.allSampleResults.find(
+                          s => s.sampleId === item.sampleId && s.annotatorId === item.annotatorId
+                        )
+                        if (fullSample) {
+                          onSelectSample(fullSample)
+                        }
+                      }}
                       className="px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-lg"
                     >
                       详情
@@ -643,9 +719,9 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
             </tbody>
           </table>
           
-          {filteredMismatched.length === 0 && (
+          {filteredDimensionMismatches.length === 0 && (
             <div className="p-12 text-center text-surface-500">
-              {stats.mismatchedSamples.length === 0 ? '所有样本均一致！' : '没有找到匹配的结果'}
+              {stats.dimensionMismatches.length === 0 ? '所有维度均一致！' : '没有找到匹配的结果'}
             </div>
           )}
         </div>
@@ -664,14 +740,68 @@ interface ScoreQAResultsProps {
 }
 
 function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, showAnnotatorTable = true }: ScoreQAResultsProps) {
-  const filteredMismatched = useMemo(() => {
-    if (!searchQuery.trim()) return stats.mismatchedSamples
-    const query = searchQuery.toLowerCase()
-    return stats.mismatchedSamples.filter(s => 
-      s.sampleId.toLowerCase().includes(query) ||
-      s.annotatorId.toLowerCase().includes(query)
-    )
-  }, [stats.mismatchedSamples, searchQuery])
+  const [selectedDimension, setSelectedDimension] = useState<Dimension | 'all'>('all')
+  
+  // Filter dimension mismatches based on search and dimension filter
+  const filteredDimensionMismatches = useMemo(() => {
+    let filtered = stats.dimensionMismatches
+    
+    // Filter by dimension
+    if (selectedDimension !== 'all') {
+      filtered = filtered.filter(s => s.dimension === selectedDimension)
+    }
+    
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      filtered = filtered.filter(s => 
+        s.sampleId.toLowerCase().includes(query) ||
+        s.annotatorId.toLowerCase().includes(query)
+      )
+    }
+    
+    return filtered
+  }, [stats.dimensionMismatches, selectedDimension, searchQuery])
+  
+  // Calculate per-annotator stats for selected dimension
+  const dimensionAnnotatorStats = useMemo(() => {
+    if (selectedDimension === 'all') {
+      return stats.byAnnotator
+    }
+    
+    // Calculate stats for the selected dimension
+    const annotatorMap: Record<string, { total: number; exactMatchCount: number; levelMatchCount: number }> = {}
+    
+    stats.allSampleResults.forEach(sample => {
+      const annotatorId = sample.annotatorId
+      if (!annotatorMap[annotatorId]) {
+        annotatorMap[annotatorId] = { total: 0, exactMatchCount: 0, levelMatchCount: 0 }
+      }
+      
+      const dimResult = sample.dimensionResults.find(d => d.dimension === selectedDimension)
+      if (dimResult) {
+        annotatorMap[annotatorId].total++
+        if (dimResult.isExactMatch) {
+          annotatorMap[annotatorId].exactMatchCount++
+        }
+        if (dimResult.isLevelMatch) {
+          annotatorMap[annotatorId].levelMatchCount++
+        }
+      }
+    })
+    
+    // Convert to the same format as stats.byAnnotator
+    const result: Record<string, { total: number; avgExactMatchRate: number; avgLevelMatchRate: number }> = {}
+    Object.entries(annotatorMap).forEach(([annotatorId, data]) => {
+      result[annotatorId] = {
+        total: data.total,
+        avgExactMatchRate: data.total > 0 ? data.exactMatchCount / data.total : 0,
+        avgLevelMatchRate: data.total > 0 ? data.levelMatchCount / data.total : 0
+      }
+    })
+    
+    return result
+  }, [stats.allSampleResults, stats.byAnnotator, selectedDimension])
 
   return (
     <>
@@ -695,14 +825,14 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
           color="sky"
         />
         <StatCard
-          title="平均分数一致率"
+          title="平均 Hard Match"
           value={`${(stats.avgExactMatchRate * 100).toFixed(1)}%`}
           color="amber"
         />
         <StatCard
-          title="平均等级一致率"
+          title="平均 Soft Match"
           value={`${(stats.avgLevelMatchRate * 100).toFixed(1)}%`}
-          color="cyan"
+          color="purple"
         />
       </div>
 
@@ -718,14 +848,20 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
               return (
                 <div
                   key={dim}
-                  className="bg-surface-800/50 rounded-xl p-4 border border-surface-700/50"
+                  className={clsx(
+                    'bg-surface-800/50 rounded-xl p-4 cursor-pointer transition-all border',
+                    selectedDimension === dim 
+                      ? 'ring-2 ring-accent-500 border-accent-500/50' 
+                      : 'border-surface-700/50 hover:bg-surface-800 hover:border-surface-600'
+                  )}
+                  onClick={() => setSelectedDimension(selectedDimension === dim ? 'all' : dim)}
                 >
                   <div className="text-sm text-surface-400 mb-2 font-medium">
                     {DIMENSION_LABELS[dim]}
                   </div>
                   <div className="space-y-2">
                     <div>
-                      <div className="text-xs text-surface-500 mb-1">分数一致</div>
+                      <div className="text-xs text-surface-500 mb-1">Hard Match</div>
                       <div className={clsx(
                         'text-lg font-bold',
                         dimStats.exactMatchRate >= 0.8 ? 'text-green-400' :
@@ -735,7 +871,7 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-surface-500 mb-1">等级一致</div>
+                      <div className="text-xs text-surface-500 mb-1">Soft Match</div>
                       <div className={clsx(
                         'text-lg font-bold',
                         dimStats.levelMatchRate >= 0.8 ? 'text-green-400' :
@@ -756,10 +892,17 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
       </div>
 
       {/* Annotator Breakdown - only show when viewing all annotators */}
-      {showAnnotatorTable && Object.keys(stats.byAnnotator).length > 1 && (
+      {showAnnotatorTable && Object.keys(dimensionAnnotatorStats).length > 1 && (
         <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
           <div className="px-6 py-4 border-b border-surface-800 bg-surface-900/50">
-            <h2 className="text-lg font-semibold text-white">分标注人员统计</h2>
+            <h2 className="text-lg font-semibold text-white">
+              分标注人员统计
+              {selectedDimension !== 'all' && (
+                <span className="text-sm font-normal text-surface-400 ml-2">
+                  （{DIMENSION_LABELS[selectedDimension]}）
+                </span>
+              )}
+            </h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -767,24 +910,26 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
                 <tr className="text-left text-surface-400 text-sm border-b border-surface-800 bg-surface-900/30">
                   <th className="px-6 py-4 font-medium">标注人员</th>
                   <th className="px-6 py-4 font-medium">样本数</th>
-                  <th className="px-6 py-4 font-medium">Hard Match</th>
-                  <th className="px-6 py-4 font-medium">Hard Match 率</th>
-                  <th className="px-6 py-4 font-medium">平均等级一致率</th>
+                  <th className="px-6 py-4 font-medium">
+                    {selectedDimension === 'all' ? '平均 Hard Match' : 'Hard Match'}
+                  </th>
+                  <th className="px-6 py-4 font-medium">
+                    {selectedDimension === 'all' ? '平均 Soft Match' : 'Soft Match'}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800/50">
-                {Object.entries(stats.byAnnotator).map(([annotatorId, annotatorStats]) => (
+                {Object.entries(dimensionAnnotatorStats).map(([annotatorId, annotatorStats]) => (
                   <tr key={annotatorId} className="hover:bg-surface-800/30 transition-colors">
                     <td className="px-6 py-4 font-medium text-cyan-400">{annotatorId}</td>
                     <td className="px-6 py-4 text-surface-300">{annotatorStats.total}</td>
-                    <td className="px-6 py-4 text-green-400 font-medium">{annotatorStats.hardMatchCount}</td>
                     <td className="px-6 py-4">
                       <span className={clsx(
                         'font-medium',
-                        annotatorStats.hardMatchRate >= 0.8 ? 'text-green-400' :
-                        annotatorStats.hardMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                        annotatorStats.avgExactMatchRate >= 0.8 ? 'text-green-400' :
+                        annotatorStats.avgExactMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
                       )}>
-                        {(annotatorStats.hardMatchRate * 100).toFixed(1)}%
+                        {(annotatorStats.avgExactMatchRate * 100).toFixed(1)}%
                       </span>
                     </td>
                     <td className="px-6 py-4">
@@ -804,13 +949,18 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
         </div>
       )}
 
-      {/* Mismatched Samples */}
+      {/* Mismatched Samples - Per Dimension */}
       <div className="bg-surface-900 rounded-2xl border border-surface-800 overflow-hidden">
         <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/50 flex-wrap gap-3">
           <h2 className="text-lg font-semibold text-white">
             不一致样本列表
+            {selectedDimension !== 'all' && (
+              <span className="text-sm font-normal text-surface-400 ml-2">
+                （筛选：{DIMENSION_LABELS[selectedDimension]}）
+              </span>
+            )}
             <span className="text-sm font-normal text-surface-400 ml-2">
-              （共 {stats.mismatchedSamples.length} 条）
+              （共 {filteredDimensionMismatches.length} 条）
             </span>
           </h2>
           <div className="relative">
@@ -832,58 +982,77 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
                 <th className="px-4 py-4 font-medium">Sample ID</th>
                 <th className="px-4 py-4 font-medium">标注人员</th>
                 <th className="px-4 py-4 font-medium">模型</th>
-                <th className="px-4 py-4 font-medium text-center">分数一致</th>
-                <th className="px-4 py-4 font-medium text-center">等级一致</th>
-                <th className="px-4 py-4 font-medium text-center">等级一致率</th>
+                <th className="px-4 py-4 font-medium">维度</th>
+                <th className="px-4 py-4 font-medium">Golden Score</th>
+                <th className="px-4 py-4 font-medium">标注 Score</th>
+                <th className="px-4 py-4 font-medium">分差</th>
                 <th className="px-4 py-4 font-medium">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-800/50">
-              {filteredMismatched.slice(0, 100).map((sample, idx) => (
-                <tr key={`${sample.sampleId}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
-                  <td className="px-4 py-4">
-                    <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={sample.sampleId}>
-                      {sample.sampleId}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-sm text-cyan-400 font-medium">{sample.annotatorId}</td>
-                  <td className="px-4 py-4 text-sm text-accent-400">{sample.videoModel || '-'}</td>
-                  <td className="px-4 py-4 text-center">
-                    <span className="text-lg font-bold text-white">
-                      {sample.exactMatchCount}/{sample.totalDimensions}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-center">
-                    <span className="text-lg font-bold text-white">
-                      {sample.levelMatchCount}/{sample.totalDimensions}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-center">
-                    <span className={clsx(
-                      'px-2.5 py-1 rounded-lg text-sm font-bold',
-                      sample.softMatchRate >= 0.8 ? 'bg-green-500/15 text-green-400' :
-                      sample.softMatchRate >= 0.6 ? 'bg-amber-500/15 text-amber-400' :
-                      'bg-red-500/15 text-red-400'
-                    )}>
-                      {(sample.softMatchRate * 100).toFixed(0)}%
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <button
-                      onClick={() => onSelectSample(sample)}
-                      className="px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-lg"
-                    >
-                      详情
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredDimensionMismatches.slice(0, 100).map((item, idx) => {
+                const scoreDiff = item.annotatorScore - item.goldenScore
+                return (
+                  <tr key={`${item.sampleId}-${item.dimension}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
+                    <td className="px-4 py-4">
+                      <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={item.sampleId}>
+                        {item.sampleId}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-cyan-400 font-medium">{item.annotatorId}</td>
+                    <td className="px-4 py-4 text-sm text-accent-400">{item.videoModel || '-'}</td>
+                    <td className="px-4 py-4 text-sm text-surface-200 font-medium">{DIMENSION_LABELS[item.dimension]}</td>
+                    <td className="px-4 py-4">
+                      <span className={clsx('text-xl font-bold', getScoreColor(item.goldenScore))}>
+                        {item.goldenScore}
+                      </span>
+                      <span className="text-xs text-surface-500 ml-1">
+                        ({getProblemLevelLabel(item.goldenLevel)})
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={clsx('text-xl font-bold', getScoreColor(item.annotatorScore))}>
+                        {item.annotatorScore}
+                      </span>
+                      <span className="text-xs text-surface-500 ml-1">
+                        ({getProblemLevelLabel(item.annotatorLevel)})
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={clsx(
+                        'font-mono font-bold',
+                        scoreDiff > 0 ? 'text-green-400' :
+                        scoreDiff < 0 ? 'text-red-400' :
+                        'text-surface-500'
+                      )}>
+                        {scoreDiff > 0 ? '+' : ''}{scoreDiff}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => {
+                          // Find the full sample result to show in modal
+                          const fullSample = stats.allSampleResults.find(
+                            s => s.sampleId === item.sampleId && s.annotatorId === item.annotatorId
+                          )
+                          if (fullSample) {
+                            onSelectSample(fullSample)
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-lg"
+                      >
+                        详情
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
           
-          {filteredMismatched.length === 0 && (
+          {filteredDimensionMismatches.length === 0 && (
             <div className="p-12 text-center text-surface-500">
-              {stats.mismatchedSamples.length === 0 ? '所有样本均一致！' : '没有找到匹配的结果'}
+              {stats.dimensionMismatches.length === 0 ? '所有维度均一致！' : '没有找到匹配的结果'}
             </div>
           )}
         </div>
@@ -897,7 +1066,7 @@ interface StatCardProps {
   title: string
   value: number | string
   subtitle?: string
-  color: 'surface' | 'green' | 'sky' | 'red' | 'amber' | 'cyan'
+  color: 'surface' | 'green' | 'sky' | 'red' | 'amber' | 'cyan' | 'purple'
 }
 
 function StatCard({ title, value, subtitle, color }: StatCardProps) {
@@ -908,6 +1077,7 @@ function StatCard({ title, value, subtitle, color }: StatCardProps) {
     red: 'bg-red-500/10 border-red-500/20',
     amber: 'bg-amber-500/10 border-amber-500/20',
     cyan: 'bg-cyan-500/10 border-cyan-500/20',
+    purple: 'bg-purple-500/10 border-purple-500/20',
   }
 
   const valueColors = {
@@ -917,6 +1087,7 @@ function StatCard({ title, value, subtitle, color }: StatCardProps) {
     red: 'text-red-400',
     amber: 'text-amber-400',
     cyan: 'text-cyan-400',
+    purple: 'text-purple-400',
   }
 
   return (
@@ -1062,25 +1233,96 @@ function PairSampleDetailModal({ sample, onClose }: PairSampleDetailModalProps) 
                   </div>
                   
                   <div className="mt-3 grid grid-cols-2 gap-4">
+                    {/* Golden Set */}
                     <div className="bg-surface-900/50 rounded-lg p-3">
-                      <p className="text-xs text-amber-400 mb-1">Golden Set</p>
+                      <p className="text-xs text-amber-400 mb-2">Golden Set</p>
                       <p className={clsx(
-                        'text-lg font-bold',
+                        'text-lg font-bold mb-2',
                         dimResult.goldenComparison === 'A>B' ? 'text-green-400' :
                         dimResult.goldenComparison === 'A<B' ? 'text-red-400' : 'text-surface-400'
                       )}>
                         {dimResult.goldenComparison}
                       </p>
+                      {/* Video A reasons */}
+                      <div className="mb-2">
+                        <p className="text-xs text-accent-400 mb-1">Video A 问题：</p>
+                        {dimResult.goldenVideoAMajorReason && (
+                          <p className="text-xs text-surface-300 mb-0.5">
+                            <span className="text-red-400">主要:</span> {dimResult.goldenVideoAMajorReason}
+                          </p>
+                        )}
+                        {dimResult.goldenVideoAMinorReason && (
+                          <p className="text-xs text-surface-400">
+                            <span className="text-amber-400">次要:</span> {dimResult.goldenVideoAMinorReason}
+                          </p>
+                        )}
+                        {!dimResult.goldenVideoAMajorReason && !dimResult.goldenVideoAMinorReason && (
+                          <p className="text-xs text-surface-500 italic">无问题</p>
+                        )}
+                      </div>
+                      {/* Video B reasons */}
+                      <div>
+                        <p className="text-xs text-orange-400 mb-1">Video B 问题：</p>
+                        {dimResult.goldenVideoBMajorReason && (
+                          <p className="text-xs text-surface-300 mb-0.5">
+                            <span className="text-red-400">主要:</span> {dimResult.goldenVideoBMajorReason}
+                          </p>
+                        )}
+                        {dimResult.goldenVideoBMinorReason && (
+                          <p className="text-xs text-surface-400">
+                            <span className="text-amber-400">次要:</span> {dimResult.goldenVideoBMinorReason}
+                          </p>
+                        )}
+                        {!dimResult.goldenVideoBMajorReason && !dimResult.goldenVideoBMinorReason && (
+                          <p className="text-xs text-surface-500 italic">无问题</p>
+                        )}
+                      </div>
                     </div>
+                    
+                    {/* Annotator Result */}
                     <div className="bg-surface-900/50 rounded-lg p-3">
-                      <p className="text-xs text-sky-400 mb-1">标注结果</p>
+                      <p className="text-xs text-sky-400 mb-2">标注结果</p>
                       <p className={clsx(
-                        'text-lg font-bold',
+                        'text-lg font-bold mb-2',
                         dimResult.annotatorComparison === 'A>B' ? 'text-green-400' :
                         dimResult.annotatorComparison === 'A<B' ? 'text-red-400' : 'text-surface-400'
                       )}>
                         {dimResult.annotatorComparison}
                       </p>
+                      {/* Video A reasons */}
+                      <div className="mb-2">
+                        <p className="text-xs text-accent-400 mb-1">Video A 问题：</p>
+                        {dimResult.annotatorVideoAMajorReason && (
+                          <p className="text-xs text-surface-300 mb-0.5">
+                            <span className="text-red-400">主要:</span> {dimResult.annotatorVideoAMajorReason}
+                          </p>
+                        )}
+                        {dimResult.annotatorVideoAMinorReason && (
+                          <p className="text-xs text-surface-400">
+                            <span className="text-amber-400">次要:</span> {dimResult.annotatorVideoAMinorReason}
+                          </p>
+                        )}
+                        {!dimResult.annotatorVideoAMajorReason && !dimResult.annotatorVideoAMinorReason && (
+                          <p className="text-xs text-surface-500 italic">无问题</p>
+                        )}
+                      </div>
+                      {/* Video B reasons */}
+                      <div>
+                        <p className="text-xs text-orange-400 mb-1">Video B 问题：</p>
+                        {dimResult.annotatorVideoBMajorReason && (
+                          <p className="text-xs text-surface-300 mb-0.5">
+                            <span className="text-red-400">主要:</span> {dimResult.annotatorVideoBMajorReason}
+                          </p>
+                        )}
+                        {dimResult.annotatorVideoBMinorReason && (
+                          <p className="text-xs text-surface-400">
+                            <span className="text-amber-400">次要:</span> {dimResult.annotatorVideoBMinorReason}
+                          </p>
+                        )}
+                        {!dimResult.annotatorVideoBMajorReason && !dimResult.annotatorVideoBMinorReason && (
+                          <p className="text-xs text-surface-500 italic">无问题</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1255,9 +1497,10 @@ function ScoreSampleDetailModal({ sample, onClose }: ScoreSampleDetailModalProps
                   </div>
                   
                   <div className="mt-3 grid grid-cols-2 gap-4">
+                    {/* Golden Set */}
                     <div className="bg-surface-900/50 rounded-lg p-3">
-                      <p className="text-xs text-amber-400 mb-1">Golden Set</p>
-                      <div className="flex items-baseline gap-2">
+                      <p className="text-xs text-amber-400 mb-2">Golden Set</p>
+                      <div className="flex items-baseline gap-2 mb-2">
                         <span className={clsx('text-2xl font-bold', getScoreColor(dimResult.goldenScore))}>
                           {dimResult.goldenScore}
                         </span>
@@ -1265,10 +1508,26 @@ function ScoreSampleDetailModal({ sample, onClose }: ScoreSampleDetailModalProps
                           ({getProblemLevelLabel(dimResult.goldenLevel)})
                         </span>
                       </div>
+                      {/* Problem reasons */}
+                      {dimResult.goldenMajorReason && (
+                        <p className="text-xs text-surface-300 mb-0.5">
+                          <span className="text-red-400">主要问题:</span> {dimResult.goldenMajorReason}
+                        </p>
+                      )}
+                      {dimResult.goldenMinorReason && (
+                        <p className="text-xs text-surface-400">
+                          <span className="text-amber-400">次要问题:</span> {dimResult.goldenMinorReason}
+                        </p>
+                      )}
+                      {!dimResult.goldenMajorReason && !dimResult.goldenMinorReason && (
+                        <p className="text-xs text-surface-500 italic">无问题描述</p>
+                      )}
                     </div>
+                    
+                    {/* Annotator Result */}
                     <div className="bg-surface-900/50 rounded-lg p-3">
-                      <p className="text-xs text-sky-400 mb-1">标注结果</p>
-                      <div className="flex items-baseline gap-2">
+                      <p className="text-xs text-sky-400 mb-2">标注结果</p>
+                      <div className="flex items-baseline gap-2 mb-2">
                         <span className={clsx('text-2xl font-bold', getScoreColor(dimResult.annotatorScore))}>
                           {dimResult.annotatorScore}
                         </span>
@@ -1276,6 +1535,20 @@ function ScoreSampleDetailModal({ sample, onClose }: ScoreSampleDetailModalProps
                           ({getProblemLevelLabel(dimResult.annotatorLevel)})
                         </span>
                       </div>
+                      {/* Problem reasons */}
+                      {dimResult.annotatorMajorReason && (
+                        <p className="text-xs text-surface-300 mb-0.5">
+                          <span className="text-red-400">主要问题:</span> {dimResult.annotatorMajorReason}
+                        </p>
+                      )}
+                      {dimResult.annotatorMinorReason && (
+                        <p className="text-xs text-surface-400">
+                          <span className="text-amber-400">次要问题:</span> {dimResult.annotatorMinorReason}
+                        </p>
+                      )}
+                      {!dimResult.annotatorMajorReason && !dimResult.annotatorMinorReason && (
+                        <p className="text-xs text-surface-500 italic">无问题描述</p>
+                      )}
                     </div>
                   </div>
                 </div>

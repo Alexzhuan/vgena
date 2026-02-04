@@ -12,9 +12,11 @@ import type {
   ScoreSampleResult,
   QAProblemLevel,
   QAPairDimensionResult,
+  QAPairDimensionMismatch,
   QAPairSampleResult,
   QAPairStats,
   QAScoreDimensionResult,
+  QAScoreDimensionMismatch,
   QAScoreSampleResult,
   QAScoreStats,
 } from '../../types/analysis'
@@ -100,8 +102,10 @@ function comparePairSample(
   let matchedCount = 0
 
   for (const dim of ALL_DIMENSIONS) {
-    const goldenComparison = golden.dimensions[dim]?.comparison
-    const annotatorComparison = annotator.dimensions[dim]?.comparison
+    const goldenDim = golden.dimensions[dim]
+    const annotatorDim = annotator.dimensions[dim]
+    const goldenComparison = goldenDim?.comparison
+    const annotatorComparison = annotatorDim?.comparison
 
     const isMatch = goldenComparison === annotatorComparison
 
@@ -114,6 +118,16 @@ function comparePairSample(
       goldenComparison,
       annotatorComparison,
       isMatch,
+      // Golden Set reasons
+      goldenVideoAMajorReason: goldenDim?.video_a?.major_reason,
+      goldenVideoAMinorReason: goldenDim?.video_a?.minor_reason,
+      goldenVideoBMajorReason: goldenDim?.video_b?.major_reason,
+      goldenVideoBMinorReason: goldenDim?.video_b?.minor_reason,
+      // Annotator reasons
+      annotatorVideoAMajorReason: annotatorDim?.video_a?.major_reason,
+      annotatorVideoAMinorReason: annotatorDim?.video_a?.minor_reason,
+      annotatorVideoBMajorReason: annotatorDim?.video_b?.major_reason,
+      annotatorVideoBMinorReason: annotatorDim?.video_b?.minor_reason,
     })
   }
 
@@ -160,6 +174,7 @@ export function calculatePairQA(
 
   const sampleResults: QAPairSampleResult[] = []
   const mismatchedSamples: QAPairSampleResult[] = []
+  const dimensionMismatches: QAPairDimensionMismatch[] = []
 
   // Initialize dimension stats
   const byDimension: QAPairStats['byDimension'] = {} as QAPairStats['byDimension']
@@ -186,11 +201,26 @@ export function calculatePairQA(
     const sampleResult = comparePairSample(golden, annotatorResult, sampleDetails)
     sampleResults.push(sampleResult)
 
-    // Update dimension stats
+    // Update dimension stats and collect dimension mismatches
     for (const dimResult of sampleResult.dimensionResults) {
       byDimension[dimResult.dimension].total++
       if (dimResult.isMatch) {
         byDimension[dimResult.dimension].matchCount++
+      } else {
+        // Add to dimension mismatches list
+        dimensionMismatches.push({
+          sampleId: sampleResult.sampleId,
+          annotatorId: sampleResult.annotatorId,
+          dimension: dimResult.dimension,
+          goldenComparison: dimResult.goldenComparison,
+          annotatorComparison: dimResult.annotatorComparison,
+          prompt: sampleResult.prompt,
+          firstFrameUrl: sampleResult.firstFrameUrl,
+          videoAUrl: sampleResult.videoAUrl,
+          videoBUrl: sampleResult.videoBUrl,
+          videoAModel: sampleResult.videoAModel,
+          videoBModel: sampleResult.videoBModel,
+        })
       }
     }
 
@@ -249,7 +279,9 @@ export function calculatePairQA(
     avgSoftMatchRate,
     byDimension,
     byAnnotator,
+    allSampleResults: sampleResults,
     mismatchedSamples,
+    dimensionMismatches,
   }
 }
 
@@ -270,8 +302,10 @@ function compareScoreSample(
   let levelMatchCount = 0
 
   for (const dim of ALL_DIMENSIONS) {
-    const goldenScore = golden.scores[dim]?.score ?? 0
-    const annotatorScore = annotator.scores[dim]?.score ?? 0
+    const goldenDim = golden.scores[dim]
+    const annotatorDim = annotator.scores[dim]
+    const goldenScore = goldenDim?.score ?? 0
+    const annotatorScore = annotatorDim?.score ?? 0
     const goldenLevel = scoreToProblemLevel(goldenScore)
     const annotatorLevel = scoreToProblemLevel(annotatorScore)
 
@@ -294,6 +328,12 @@ function compareScoreSample(
       annotatorLevel,
       isExactMatch,
       isLevelMatch,
+      // Golden Set reasons
+      goldenMajorReason: goldenDim?.major_reason,
+      goldenMinorReason: goldenDim?.minor_reason,
+      // Annotator reasons
+      annotatorMajorReason: annotatorDim?.major_reason,
+      annotatorMinorReason: annotatorDim?.minor_reason,
     })
   }
 
@@ -339,6 +379,7 @@ export function calculateScoreQA(
 
   const sampleResults: QAScoreSampleResult[] = []
   const mismatchedSamples: QAScoreSampleResult[] = []
+  const dimensionMismatches: QAScoreDimensionMismatch[] = []
 
   // Initialize dimension stats
   const byDimension: QAScoreStats['byDimension'] = {} as QAScoreStats['byDimension']
@@ -356,6 +397,8 @@ export function calculateScoreQA(
   const annotatorStatsMap = new Map<string, {
     total: number
     hardMatchCount: number
+    softMatchCount: number
+    exactMatchSum: number
     levelMatchSum: number
   }>()
 
@@ -371,7 +414,7 @@ export function calculateScoreQA(
     const sampleResult = compareScoreSample(golden, annotatorResult, sampleDetails)
     sampleResults.push(sampleResult)
 
-    // Update dimension stats
+    // Update dimension stats and collect dimension mismatches
     for (const dimResult of sampleResult.dimensionResults) {
       byDimension[dimResult.dimension].total++
       if (dimResult.isExactMatch) {
@@ -379,6 +422,21 @@ export function calculateScoreQA(
       }
       if (dimResult.isLevelMatch) {
         byDimension[dimResult.dimension].levelMatchCount++
+      } else {
+        // Add to dimension mismatches list (only if not level match, i.e., not soft match)
+        dimensionMismatches.push({
+          sampleId: sampleResult.sampleId,
+          annotatorId: sampleResult.annotatorId,
+          dimension: dimResult.dimension,
+          goldenScore: dimResult.goldenScore,
+          annotatorScore: dimResult.annotatorScore,
+          goldenLevel: dimResult.goldenLevel,
+          annotatorLevel: dimResult.annotatorLevel,
+          prompt: sampleResult.prompt,
+          firstFrameUrl: sampleResult.firstFrameUrl,
+          videoUrl: sampleResult.videoUrl,
+          videoModel: sampleResult.videoModel,
+        })
       }
     }
 
@@ -388,6 +446,8 @@ export function calculateScoreQA(
       annotatorStatsMap.set(annotatorId, {
         total: 0,
         hardMatchCount: 0,
+        softMatchCount: 0,
+        exactMatchSum: 0,
         levelMatchSum: 0,
       })
     }
@@ -396,6 +456,10 @@ export function calculateScoreQA(
     if (sampleResult.hardMatch) {
       annotatorStats.hardMatchCount++
     }
+    if (sampleResult.levelMatchCount === ALL_DIMENSIONS.length) {
+      annotatorStats.softMatchCount++
+    }
+    annotatorStats.exactMatchSum += sampleResult.exactMatchCount / sampleResult.totalDimensions
     annotatorStats.levelMatchSum += sampleResult.softMatchRate
 
     // Track mismatched samples
@@ -418,6 +482,9 @@ export function calculateScoreQA(
       total: stats.total,
       hardMatchCount: stats.hardMatchCount,
       hardMatchRate: stats.total > 0 ? stats.hardMatchCount / stats.total : 0,
+      softMatchCount: stats.softMatchCount,
+      softMatchRate: stats.total > 0 ? stats.softMatchCount / stats.total : 0,
+      avgExactMatchRate: stats.total > 0 ? stats.exactMatchSum / stats.total : 0,
       avgLevelMatchRate: stats.total > 0 ? stats.levelMatchSum / stats.total : 0,
     }
   }
@@ -446,6 +513,8 @@ export function calculateScoreQA(
     avgLevelMatchRate,
     byDimension,
     byAnnotator,
+    allSampleResults: sampleResults,
     mismatchedSamples,
+    dimensionMismatches,
   }
 }

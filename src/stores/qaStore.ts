@@ -5,7 +5,10 @@ import type {
   ScoreSampleResult,
   QAPairStats,
   QAScoreStats,
+  QAPairDimensionMismatch,
+  QAScoreDimensionMismatch,
 } from '../types/analysis'
+import type { Dimension } from '../types'
 import { 
   calculatePairQA, 
   calculateScoreQA,
@@ -152,6 +155,14 @@ function buildScoreSampleDetailsMap(samples: ScoreSample[]): ScoreSampleDetailsM
   return map
 }
 
+const ALL_DIMENSIONS: Dimension[] = [
+  'text_consistency',
+  'temporal_consistency',
+  'visual_quality',
+  'distortion',
+  'motion_quality',
+]
+
 export const useQAStore = create<QAState>((set, get) => ({
   mode: 'pair',
   
@@ -205,10 +216,41 @@ export const useQAStore = create<QAState>((set, get) => ({
     const annotatorData = state.qaPairStats.byAnnotator[annotatorId]
     if (!annotatorData) return null
     
+    // Filter all sample results for this annotator
+    const filteredSamples = state.qaPairStats.allSampleResults.filter(
+      s => s.annotatorId === annotatorId
+    )
+    
     // Filter mismatched samples for this annotator
     const filteredMismatched = state.qaPairStats.mismatchedSamples.filter(
       s => s.annotatorId === annotatorId
     )
+    
+    // Filter dimension mismatches for this annotator
+    const filteredDimensionMismatches = state.qaPairStats.dimensionMismatches.filter(
+      s => s.annotatorId === annotatorId
+    )
+    
+    // Recalculate byDimension based on filtered samples
+    const byDimension: QAPairStats['byDimension'] = {} as QAPairStats['byDimension']
+    for (const dim of ALL_DIMENSIONS) {
+      byDimension[dim] = { total: 0, matchCount: 0, matchRate: 0 }
+    }
+    
+    for (const sample of filteredSamples) {
+      for (const dimResult of sample.dimensionResults) {
+        byDimension[dimResult.dimension].total++
+        if (dimResult.isMatch) {
+          byDimension[dimResult.dimension].matchCount++
+        }
+      }
+    }
+    
+    // Calculate dimension rates
+    for (const dim of ALL_DIMENSIONS) {
+      const stats = byDimension[dim]
+      stats.matchRate = stats.total > 0 ? stats.matchCount / stats.total : 0
+    }
     
     return {
       ...state.qaPairStats,
@@ -216,8 +258,11 @@ export const useQAStore = create<QAState>((set, get) => ({
       hardMatchCount: annotatorData.hardMatchCount,
       hardMatchRate: annotatorData.hardMatchRate,
       avgSoftMatchRate: annotatorData.avgSoftMatchRate,
+      byDimension,
       byAnnotator: { [annotatorId]: annotatorData },
+      allSampleResults: filteredSamples,
       mismatchedSamples: filteredMismatched,
+      dimensionMismatches: filteredDimensionMismatches,
     }
   },
   
@@ -232,19 +277,66 @@ export const useQAStore = create<QAState>((set, get) => ({
     const annotatorData = state.qaScoreStats.byAnnotator[annotatorId]
     if (!annotatorData) return null
     
+    // Filter all sample results for this annotator
+    const filteredSamples = state.qaScoreStats.allSampleResults.filter(
+      s => s.annotatorId === annotatorId
+    )
+    
     // Filter mismatched samples for this annotator
     const filteredMismatched = state.qaScoreStats.mismatchedSamples.filter(
       s => s.annotatorId === annotatorId
     )
+    
+    // Filter dimension mismatches for this annotator
+    const filteredDimensionMismatches = state.qaScoreStats.dimensionMismatches.filter(
+      s => s.annotatorId === annotatorId
+    )
+    
+    // Recalculate byDimension based on filtered samples
+    const byDimension: QAScoreStats['byDimension'] = {} as QAScoreStats['byDimension']
+    for (const dim of ALL_DIMENSIONS) {
+      byDimension[dim] = {
+        total: 0,
+        exactMatchCount: 0,
+        exactMatchRate: 0,
+        levelMatchCount: 0,
+        levelMatchRate: 0,
+      }
+    }
+    
+    for (const sample of filteredSamples) {
+      for (const dimResult of sample.dimensionResults) {
+        byDimension[dimResult.dimension].total++
+        if (dimResult.isExactMatch) {
+          byDimension[dimResult.dimension].exactMatchCount++
+        }
+        if (dimResult.isLevelMatch) {
+          byDimension[dimResult.dimension].levelMatchCount++
+        }
+      }
+    }
+    
+    // Calculate dimension rates
+    for (const dim of ALL_DIMENSIONS) {
+      const stats = byDimension[dim]
+      stats.exactMatchRate = stats.total > 0 ? stats.exactMatchCount / stats.total : 0
+      stats.levelMatchRate = stats.total > 0 ? stats.levelMatchCount / stats.total : 0
+    }
     
     return {
       ...state.qaScoreStats,
       totalSamples: annotatorData.total,
       hardMatchCount: annotatorData.hardMatchCount,
       hardMatchRate: annotatorData.hardMatchRate,
+      softMatchCount: annotatorData.softMatchCount,
+      softMatchRate: annotatorData.softMatchRate,
+      avgExactMatchRate: annotatorData.avgExactMatchRate,
       avgLevelMatchRate: annotatorData.avgLevelMatchRate,
+      byDimension,
       byAnnotator: { [annotatorId]: annotatorData },
+      allSampleResults: filteredSamples,
       mismatchedSamples: filteredMismatched,
+      dimensionMismatches: filteredDimensionMismatches,
     }
   },
   
