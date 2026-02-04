@@ -146,7 +146,22 @@ export function Header() {
   const doExport = () => {
     if (!taskPackage) return
     const data = exportResults()
-    const filename = `annotation_${taskPackage.task_id}_${new Date().toISOString().split('T')[0]}.json`
+    const stats = getCompletionStats()
+    
+    // 格式化时间戳: YYYYMMDD_HHmmss
+    const now = new Date()
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
+    const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '')
+    
+    // 构建详细文件名
+    const filename = [
+      'annotation',
+      taskPackage.task_id,
+      taskPackage.annotator_id,
+      `${stats.completed}-${stats.total}`,
+      `${dateStr}_${timeStr}`
+    ].join('_') + '.json'
+    
     downloadJSON(data, filename)
   }
 
