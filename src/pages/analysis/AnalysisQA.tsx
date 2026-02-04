@@ -447,6 +447,9 @@ export function AnalysisQA() {
   )
 }
 
+// Match view type for Pair QA
+type PairMatchView = 'hard' | 'soft'
+
 // Pair QA Results Component
 interface PairQAResultsProps {
   stats: QAPairStats
@@ -458,8 +461,9 @@ interface PairQAResultsProps {
 
 function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, showAnnotatorTable = true }: PairQAResultsProps) {
   const [selectedDimension, setSelectedDimension] = useState<Dimension | 'all'>('all')
+  const [matchView, setMatchView] = useState<PairMatchView>('soft')
   
-  // Filter dimension mismatches based on search and dimension filter
+  // Filter dimension mismatches based on search and dimension filter (for Soft Match view)
   const filteredDimensionMismatches = useMemo(() => {
     let filtered = stats.dimensionMismatches
     
@@ -479,6 +483,22 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
     
     return filtered
   }, [stats.dimensionMismatches, selectedDimension, searchQuery])
+  
+  // Filter mismatched samples based on search (for Hard Match view)
+  const filteredMismatchedSamples = useMemo(() => {
+    let filtered = stats.mismatchedSamples
+    
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      filtered = filtered.filter(s => 
+        s.sampleId.toLowerCase().includes(query) ||
+        s.annotatorId.toLowerCase().includes(query)
+      )
+    }
+    
+    return filtered
+  }, [stats.mismatchedSamples, searchQuery])
   
   // Calculate per-annotator stats for selected dimension
   const dimensionAnnotatorStats = useMemo(() => {
@@ -573,9 +593,6 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
                   )}>
                     {(dimStats.matchRate * 100).toFixed(1)}%
                   </div>
-                  <div className="text-xs text-surface-500">
-                    {dimStats.matchCount} / {dimStats.total}
-                  </div>
                   <div className="mt-3 h-2 bg-surface-700 rounded-full overflow-hidden">
                     <div
                       className={clsx(
@@ -639,20 +656,49 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
         </div>
       )}
 
-      {/* Mismatched Samples - Per Dimension */}
+      {/* Mismatched Samples */}
       <div className="bg-surface-900 rounded-2xl border border-surface-800 overflow-hidden">
         <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/50 flex-wrap gap-3">
-          <h2 className="text-lg font-semibold text-white">
-            不一致样本列表
-            {selectedDimension !== 'all' && (
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-semibold text-white">
+              不一致样本列表
+              {matchView === 'soft' && selectedDimension !== 'all' && (
+                <span className="text-sm font-normal text-surface-400 ml-2">
+                  （筛选：{DIMENSION_LABELS[selectedDimension]}）
+                </span>
+              )}
               <span className="text-sm font-normal text-surface-400 ml-2">
-                （筛选：{DIMENSION_LABELS[selectedDimension]}）
+                （共 {matchView === 'hard' ? filteredMismatchedSamples.length : filteredDimensionMismatches.length} 条）
               </span>
-            )}
-            <span className="text-sm font-normal text-surface-400 ml-2">
-              （共 {filteredDimensionMismatches.length} 条）
-            </span>
-          </h2>
+            </h2>
+            
+            {/* Match View Toggle */}
+            <div className="flex bg-surface-800 rounded-lg p-0.5 border border-surface-700">
+              <button
+                onClick={() => setMatchView('hard')}
+                className={clsx(
+                  'px-3 py-1 rounded-md text-xs font-medium transition-all',
+                  matchView === 'hard'
+                    ? 'bg-green-600 text-white shadow-sm'
+                    : 'text-surface-400 hover:text-white'
+                )}
+              >
+                Hard Match
+              </button>
+              <button
+                onClick={() => setMatchView('soft')}
+                className={clsx(
+                  'px-3 py-1 rounded-md text-xs font-medium transition-all',
+                  matchView === 'soft'
+                    ? 'bg-sky-600 text-white shadow-sm'
+                    : 'text-surface-400 hover:text-white'
+                )}
+              >
+                Soft Match
+              </button>
+            </div>
+          </div>
+          
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" />
             <input
@@ -665,83 +711,161 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
           </div>
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="text-left text-surface-400 text-sm border-b border-surface-800 bg-surface-900/30">
-                <th className="px-4 py-4 font-medium">Sample ID</th>
-                <th className="px-4 py-4 font-medium">标注人员</th>
-                <th className="px-4 py-4 font-medium">Model A</th>
-                <th className="px-4 py-4 font-medium">Model B</th>
-                <th className="px-4 py-4 font-medium">维度</th>
-                <th className="px-4 py-4 font-medium">Golden</th>
-                <th className="px-4 py-4 font-medium">标注</th>
-                <th className="px-4 py-4 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-surface-800/50">
-              {filteredDimensionMismatches.slice(0, 100).map((item, idx) => (
-                <tr key={`${item.sampleId}-${item.dimension}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
-                  <td className="px-4 py-4">
-                    <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={item.sampleId}>
-                      {item.sampleId}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-sm text-cyan-400 font-medium">{item.annotatorId}</td>
-                  <td className="px-4 py-4 text-sm text-accent-400">{item.videoAModel || '-'}</td>
-                  <td className="px-4 py-4 text-sm text-orange-400">{item.videoBModel || '-'}</td>
-                  <td className="px-4 py-4 text-sm text-surface-200 font-medium">{DIMENSION_LABELS[item.dimension]}</td>
-                  <td className="px-4 py-4">
-                    <span className={clsx(
-                      'px-2.5 py-1 rounded-lg text-sm font-bold',
-                      item.goldenComparison === 'A>B' ? 'bg-green-500/15 text-green-400' :
-                      item.goldenComparison === 'A<B' ? 'bg-red-500/15 text-red-400' :
-                      'bg-surface-700 text-surface-400'
-                    )}>
-                      {item.goldenComparison}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className={clsx(
-                      'px-2.5 py-1 rounded-lg text-sm font-bold',
-                      item.annotatorComparison === 'A>B' ? 'bg-green-500/15 text-green-400' :
-                      item.annotatorComparison === 'A<B' ? 'bg-red-500/15 text-red-400' :
-                      'bg-surface-700 text-surface-400'
-                    )}>
-                      {item.annotatorComparison}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <button
-                      onClick={() => {
-                        // Find the full sample result to show in modal
-                        const fullSample = stats.allSampleResults.find(
-                          s => s.sampleId === item.sampleId && s.annotatorId === item.annotatorId
-                        )
-                        if (fullSample) {
-                          onSelectSample(fullSample)
-                        }
-                      }}
-                      className="px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-lg"
-                    >
-                      详情
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          
-          {filteredDimensionMismatches.length === 0 && (
-            <div className="p-12 text-center text-surface-500">
-              {stats.dimensionMismatches.length === 0 ? '所有维度均一致！' : '没有找到匹配的结果'}
-            </div>
+        {/* Match View Description */}
+        <div className="px-6 py-2 bg-surface-800/30 border-b border-surface-800 text-xs text-surface-400">
+          {matchView === 'hard' ? (
+            <span>
+              <span className="text-green-400 font-medium">Hard Match</span>：显示不完全匹配的样本（有任何维度 comparison 与 Golden 不一致）
+            </span>
+          ) : (
+            <span>
+              <span className="text-sky-400 font-medium">Soft Match</span>：显示每个不一致的维度记录（按维度展开）
+            </span>
           )}
         </div>
+        
+        {/* Hard Match View - Sample Level */}
+        {matchView === 'hard' && (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-left text-surface-400 text-sm border-b border-surface-800 bg-surface-900/30">
+                  <th className="px-4 py-4 font-medium">Sample ID</th>
+                  <th className="px-4 py-4 font-medium">标注人员</th>
+                  <th className="px-4 py-4 font-medium">Model A</th>
+                  <th className="px-4 py-4 font-medium">Model B</th>
+                  <th className="px-4 py-4 font-medium">一致维度</th>
+                  <th className="px-4 py-4 font-medium">一致率</th>
+                  <th className="px-4 py-4 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-800/50">
+                {filteredMismatchedSamples.slice(0, 100).map((sample, idx) => (
+                  <tr key={`${sample.sampleId}-${sample.annotatorId}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
+                    <td className="px-4 py-4">
+                      <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={sample.sampleId}>
+                        {sample.sampleId}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-cyan-400 font-medium">{sample.annotatorId}</td>
+                    <td className="px-4 py-4 text-sm text-accent-400">{sample.videoAModel || '-'}</td>
+                    <td className="px-4 py-4 text-sm text-orange-400">{sample.videoBModel || '-'}</td>
+                    <td className="px-4 py-4 text-sm text-white font-medium">
+                      {sample.matchedCount} / {sample.totalDimensions}
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={clsx(
+                        'font-medium',
+                        sample.softMatchRate >= 0.8 ? 'text-green-400' :
+                        sample.softMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                      )}>
+                        {(sample.softMatchRate * 100).toFixed(0)}%
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => onSelectSample(sample)}
+                        className="px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-lg"
+                      >
+                        详情
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            
+            {filteredMismatchedSamples.length === 0 && (
+              <div className="p-12 text-center text-surface-500">
+                {stats.mismatchedSamples.length === 0 ? '所有样本均完全匹配！' : '没有找到匹配的结果'}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Soft Match View - Dimension Level */}
+        {matchView === 'soft' && (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-left text-surface-400 text-sm border-b border-surface-800 bg-surface-900/30">
+                  <th className="px-4 py-4 font-medium">Sample ID</th>
+                  <th className="px-4 py-4 font-medium">标注人员</th>
+                  <th className="px-4 py-4 font-medium">Model A</th>
+                  <th className="px-4 py-4 font-medium">Model B</th>
+                  <th className="px-4 py-4 font-medium">维度</th>
+                  <th className="px-4 py-4 font-medium">Golden</th>
+                  <th className="px-4 py-4 font-medium">标注</th>
+                  <th className="px-4 py-4 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-800/50">
+                {filteredDimensionMismatches.slice(0, 100).map((item, idx) => (
+                  <tr key={`${item.sampleId}-${item.dimension}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
+                    <td className="px-4 py-4">
+                      <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={item.sampleId}>
+                        {item.sampleId}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-cyan-400 font-medium">{item.annotatorId}</td>
+                    <td className="px-4 py-4 text-sm text-accent-400">{item.videoAModel || '-'}</td>
+                    <td className="px-4 py-4 text-sm text-orange-400">{item.videoBModel || '-'}</td>
+                    <td className="px-4 py-4 text-sm text-surface-200 font-medium">{DIMENSION_LABELS[item.dimension]}</td>
+                    <td className="px-4 py-4">
+                      <span className={clsx(
+                        'px-2.5 py-1 rounded-lg text-sm font-bold',
+                        item.goldenComparison === 'A>B' ? 'bg-green-500/15 text-green-400' :
+                        item.goldenComparison === 'A<B' ? 'bg-red-500/15 text-red-400' :
+                        'bg-surface-700 text-surface-400'
+                      )}>
+                        {item.goldenComparison}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={clsx(
+                        'px-2.5 py-1 rounded-lg text-sm font-bold',
+                        item.annotatorComparison === 'A>B' ? 'bg-green-500/15 text-green-400' :
+                        item.annotatorComparison === 'A<B' ? 'bg-red-500/15 text-red-400' :
+                        'bg-surface-700 text-surface-400'
+                      )}>
+                        {item.annotatorComparison}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => {
+                          // Find the full sample result to show in modal
+                          const fullSample = stats.allSampleResults.find(
+                            s => s.sampleId === item.sampleId && s.annotatorId === item.annotatorId
+                          )
+                          if (fullSample) {
+                            onSelectSample(fullSample)
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-lg"
+                      >
+                        详情
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            
+            {filteredDimensionMismatches.length === 0 && (
+              <div className="p-12 text-center text-surface-500">
+                {stats.dimensionMismatches.length === 0 ? '所有维度均一致！' : '没有找到匹配的结果'}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </>
   )
 }
+
+// Match mode type for Score QA
+type ScoreMatchMode = 'hard' | 'soft'
 
 // Score QA Results Component
 interface ScoreQAResultsProps {
@@ -754,10 +878,44 @@ interface ScoreQAResultsProps {
 
 function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, showAnnotatorTable = true }: ScoreQAResultsProps) {
   const [selectedDimension, setSelectedDimension] = useState<Dimension | 'all'>('all')
+  const [matchMode, setMatchMode] = useState<ScoreMatchMode>('hard')
+  
+  // Generate dimension mismatches based on match mode
+  // Hard Match: !isExactMatch (score not exactly equal)
+  // Soft Match: !isLevelMatch (problem level different)
+  const dimensionMismatchesByMode = useMemo(() => {
+    const mismatches: typeof stats.dimensionMismatches = []
+    
+    for (const sample of stats.allSampleResults) {
+      for (const dimResult of sample.dimensionResults) {
+        const shouldInclude = matchMode === 'hard' 
+          ? !dimResult.isExactMatch 
+          : !dimResult.isLevelMatch
+        
+        if (shouldInclude) {
+          mismatches.push({
+            sampleId: sample.sampleId,
+            annotatorId: sample.annotatorId,
+            dimension: dimResult.dimension,
+            goldenScore: dimResult.goldenScore,
+            annotatorScore: dimResult.annotatorScore,
+            goldenLevel: dimResult.goldenLevel,
+            annotatorLevel: dimResult.annotatorLevel,
+            prompt: sample.prompt,
+            firstFrameUrl: sample.firstFrameUrl,
+            videoUrl: sample.videoUrl,
+            videoModel: sample.videoModel,
+          })
+        }
+      }
+    }
+    
+    return mismatches
+  }, [stats.allSampleResults, matchMode])
   
   // Filter dimension mismatches based on search and dimension filter
   const filteredDimensionMismatches = useMemo(() => {
-    let filtered = stats.dimensionMismatches
+    let filtered = dimensionMismatchesByMode
     
     // Filter by dimension
     if (selectedDimension !== 'all') {
@@ -774,7 +932,7 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
     }
     
     return filtered
-  }, [stats.dimensionMismatches, selectedDimension, searchQuery])
+  }, [dimensionMismatchesByMode, selectedDimension, searchQuery])
   
   // Calculate per-annotator stats for selected dimension
   const dimensionAnnotatorStats = useMemo(() => {
@@ -815,37 +973,25 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
     
     return result
   }, [stats.allSampleResults, stats.byAnnotator, selectedDimension])
-
+  
   return (
     <>
       {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <StatCard
           title="总样本数"
           value={stats.totalSamples}
           color="surface"
         />
         <StatCard
-          title="Hard Match"
-          value={stats.hardMatchCount}
-          subtitle={`${(stats.hardMatchRate * 100).toFixed(1)}%`}
-          color="green"
-        />
-        <StatCard
-          title="Soft Match"
-          value={stats.softMatchCount}
-          subtitle={`${(stats.softMatchRate * 100).toFixed(1)}%`}
-          color="sky"
-        />
-        <StatCard
           title="平均 Hard Match"
           value={`${(stats.avgExactMatchRate * 100).toFixed(1)}%`}
-          color="amber"
+          color="green"
         />
         <StatCard
           title="平均 Soft Match"
           value={`${(stats.avgLevelMatchRate * 100).toFixed(1)}%`}
-          color="purple"
+          color="sky"
         />
       </div>
 
@@ -893,9 +1039,6 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
                         {(dimStats.levelMatchRate * 100).toFixed(1)}%
                       </div>
                     </div>
-                  </div>
-                  <div className="text-xs text-surface-500 mt-2">
-                    {dimStats.exactMatchCount} / {dimStats.total}
                   </div>
                 </div>
               )
@@ -965,17 +1108,46 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
       {/* Mismatched Samples - Per Dimension */}
       <div className="bg-surface-900 rounded-2xl border border-surface-800 overflow-hidden">
         <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/50 flex-wrap gap-3">
-          <h2 className="text-lg font-semibold text-white">
-            不一致样本列表
-            {selectedDimension !== 'all' && (
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-semibold text-white">
+              不一致样本列表
+              {selectedDimension !== 'all' && (
+                <span className="text-sm font-normal text-surface-400 ml-2">
+                  （筛选：{DIMENSION_LABELS[selectedDimension]}）
+                </span>
+              )}
               <span className="text-sm font-normal text-surface-400 ml-2">
-                （筛选：{DIMENSION_LABELS[selectedDimension]}）
+                （共 {filteredDimensionMismatches.length} 条）
               </span>
-            )}
-            <span className="text-sm font-normal text-surface-400 ml-2">
-              （共 {filteredDimensionMismatches.length} 条）
-            </span>
-          </h2>
+            </h2>
+            
+            {/* Match Mode Toggle */}
+            <div className="flex bg-surface-800 rounded-lg p-0.5 border border-surface-700">
+              <button
+                onClick={() => setMatchMode('hard')}
+                className={clsx(
+                  'px-3 py-1 rounded-md text-xs font-medium transition-all',
+                  matchMode === 'hard'
+                    ? 'bg-green-600 text-white shadow-sm'
+                    : 'text-surface-400 hover:text-white'
+                )}
+              >
+                Hard Match
+              </button>
+              <button
+                onClick={() => setMatchMode('soft')}
+                className={clsx(
+                  'px-3 py-1 rounded-md text-xs font-medium transition-all',
+                  matchMode === 'soft'
+                    ? 'bg-sky-600 text-white shadow-sm'
+                    : 'text-surface-400 hover:text-white'
+                )}
+              >
+                Soft Match
+              </button>
+            </div>
+          </div>
+          
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" />
             <input
@@ -986,6 +1158,19 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
               className="bg-surface-800 border border-surface-700 rounded-lg pl-9 pr-4 py-1.5 text-sm text-surface-200 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 w-56"
             />
           </div>
+        </div>
+        
+        {/* Match Mode Description */}
+        <div className="px-6 py-2 bg-surface-800/30 border-b border-surface-800 text-xs text-surface-400">
+          {matchMode === 'hard' ? (
+            <span>
+              <span className="text-green-400 font-medium">Hard Match</span>：显示分数不完全相等的维度（Golden 分数 ≠ 标注分数）
+            </span>
+          ) : (
+            <span>
+              <span className="text-sky-400 font-medium">Soft Match</span>：显示问题等级不一致的维度（5分=无问题，3-4分=次要问题，1-2分=主要问题）
+            </span>
+          )}
         </div>
         
         <div className="overflow-x-auto">
