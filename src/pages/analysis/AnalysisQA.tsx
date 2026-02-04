@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
-import { AnalysisHeader } from '../../components/analysis'
+import { AnalysisHeader, VideoCompare } from '../../components/analysis'
+import { ImageModal } from '../../components/common'
 import { useQAStore } from '../../stores/qaStore'
 import { DIMENSION_LABELS, DIMENSIONS } from '../../types'
 import type { 
@@ -19,6 +20,9 @@ import {
   XCircle,
   AlertTriangle,
   Search,
+  Image,
+  Users,
+  ChevronDown,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -41,11 +45,22 @@ export function AnalysisQA() {
     clearAll,
     clearGoldenSet,
     clearAnnotatorData,
+    // Annotator selection
+    selectedAnnotatorId,
+    annotatorIds,
+    setSelectedAnnotatorId,
+    getFilteredPairStats,
+    getFilteredScoreStats,
   } = useQAStore()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedPairSample, setSelectedPairSample] = useState<QAPairSampleResult | null>(null)
   const [selectedScoreSample, setSelectedScoreSample] = useState<QAScoreSampleResult | null>(null)
+  const [showAnnotatorDropdown, setShowAnnotatorDropdown] = useState(false)
+  
+  // Get filtered stats based on selected annotator
+  const filteredPairStats = getFilteredPairStats()
+  const filteredScoreStats = getFilteredScoreStats()
 
   // File drop handlers
   const handleGoldenFileDrop = useCallback(async (e: React.DragEvent) => {
@@ -271,20 +286,75 @@ export function AnalysisQA() {
         {/* QA Results */}
         {stats && (
           <>
-            {mode === 'pair' && qaPairStats && (
+            {/* Annotator Selector */}
+            {annotatorIds.length > 0 && (
+              <div className="mb-6 flex items-center gap-4">
+                <div className="flex items-center gap-2 text-surface-400">
+                  <Users className="w-5 h-5" />
+                  <span className="text-sm font-medium">标注员筛选：</span>
+                </div>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowAnnotatorDropdown(!showAnnotatorDropdown)}
+                    className="flex items-center gap-2 px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm hover:bg-surface-700 transition-colors min-w-[160px]"
+                  >
+                    <span className={selectedAnnotatorId ? 'text-cyan-400 font-medium' : 'text-surface-300'}>
+                      {selectedAnnotatorId || '全部标注员'}
+                    </span>
+                    <ChevronDown className={clsx('w-4 h-4 text-surface-400 transition-transform', showAnnotatorDropdown && 'rotate-180')} />
+                  </button>
+                  
+                  {showAnnotatorDropdown && (
+                    <div className="absolute top-full left-0 mt-1 w-full bg-surface-800 border border-surface-700 rounded-lg shadow-xl z-20 py-1 max-h-60 overflow-y-auto">
+                      <button
+                        onClick={() => { setSelectedAnnotatorId(null); setShowAnnotatorDropdown(false) }}
+                        className={clsx(
+                          'w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors',
+                          !selectedAnnotatorId ? 'text-accent-400 font-medium bg-surface-700/50' : 'text-surface-300'
+                        )}
+                      >
+                        全部标注员
+                      </button>
+                      {annotatorIds.map(id => (
+                        <button
+                          key={id}
+                          onClick={() => { setSelectedAnnotatorId(id); setShowAnnotatorDropdown(false) }}
+                          className={clsx(
+                            'w-full px-4 py-2 text-left text-sm hover:bg-surface-700 transition-colors',
+                            selectedAnnotatorId === id ? 'text-cyan-400 font-medium bg-surface-700/50' : 'text-surface-300'
+                          )}
+                        >
+                          {id}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                {selectedAnnotatorId && (
+                  <span className="text-xs text-surface-500">
+                    当前查看 <span className="text-cyan-400">{selectedAnnotatorId}</span> 的质检结果
+                  </span>
+                )}
+              </div>
+            )}
+            
+            {mode === 'pair' && filteredPairStats && (
               <PairQAResults 
-                stats={qaPairStats} 
+                stats={filteredPairStats} 
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
                 onSelectSample={setSelectedPairSample}
+                showAnnotatorTable={!selectedAnnotatorId}
               />
             )}
-            {mode === 'score' && qaScoreStats && (
+            {mode === 'score' && filteredScoreStats && (
               <ScoreQAResults 
-                stats={qaScoreStats}
+                stats={filteredScoreStats}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
                 onSelectSample={setSelectedScoreSample}
+                showAnnotatorTable={!selectedAnnotatorId}
               />
             )}
           </>
@@ -367,9 +437,10 @@ interface PairQAResultsProps {
   searchQuery: string
   setSearchQuery: (q: string) => void
   onSelectSample: (s: QAPairSampleResult) => void
+  showAnnotatorTable?: boolean
 }
 
-function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample }: PairQAResultsProps) {
+function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, showAnnotatorTable = true }: PairQAResultsProps) {
   const filteredMismatched = useMemo(() => {
     if (!searchQuery.trim()) return stats.mismatchedSamples
     const query = searchQuery.toLowerCase()
@@ -450,8 +521,8 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample }: P
         </div>
       </div>
 
-      {/* Annotator Breakdown */}
-      {Object.keys(stats.byAnnotator).length > 0 && (
+      {/* Annotator Breakdown - only show when viewing all annotators */}
+      {showAnnotatorTable && Object.keys(stats.byAnnotator).length > 1 && (
         <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
           <div className="px-6 py-4 border-b border-surface-800 bg-surface-900/50">
             <h2 className="text-lg font-semibold text-white">分标注人员统计</h2>
@@ -589,9 +660,10 @@ interface ScoreQAResultsProps {
   searchQuery: string
   setSearchQuery: (q: string) => void
   onSelectSample: (s: QAScoreSampleResult) => void
+  showAnnotatorTable?: boolean
 }
 
-function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample }: ScoreQAResultsProps) {
+function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, showAnnotatorTable = true }: ScoreQAResultsProps) {
   const filteredMismatched = useMemo(() => {
     if (!searchQuery.trim()) return stats.mismatchedSamples
     const query = searchQuery.toLowerCase()
@@ -683,8 +755,8 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample }: 
         </div>
       </div>
 
-      {/* Annotator Breakdown */}
-      {Object.keys(stats.byAnnotator).length > 0 && (
+      {/* Annotator Breakdown - only show when viewing all annotators */}
+      {showAnnotatorTable && Object.keys(stats.byAnnotator).length > 1 && (
         <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
           <div className="px-6 py-4 border-b border-surface-800 bg-surface-900/50">
             <h2 className="text-lg font-semibold text-white">分标注人员统计</h2>
@@ -865,112 +937,169 @@ interface PairSampleDetailModalProps {
 }
 
 function PairSampleDetailModal({ sample, onClose }: PairSampleDetailModalProps) {
+  const [showImageModal, setShowImageModal] = useState(false)
+  
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-surface-900 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col border border-surface-800">
-        <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/80">
-          <div>
-            <h2 className="text-lg font-bold text-white">{sample.sampleId}</h2>
-            <p className="text-sm text-surface-400">
-              标注人员: <span className="text-cyan-400">{sample.annotatorId}</span>
-              {sample.videoAModel && (
-                <span className="ml-3">
-                  {sample.videoAModel} vs {sample.videoBModel}
-                </span>
-              )}
-            </p>
+    <>
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-surface-900 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col border border-surface-800">
+          <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/80">
+            <div>
+              <h2 className="text-lg font-bold text-white">{sample.sampleId}</h2>
+              <p className="text-sm text-surface-400">
+                标注人员: <span className="text-cyan-400">{sample.annotatorId}</span>
+                {sample.videoAModel && (
+                  <span className="ml-3">
+                    {sample.videoAModel} vs {sample.videoBModel}
+                  </span>
+                )}
+              </p>
+            </div>
+            <button 
+              onClick={onClose} 
+              className="w-10 h-10 rounded-xl bg-surface-800 hover:bg-surface-700 flex items-center justify-center transition-colors"
+            >
+              <X className="w-5 h-5 text-surface-400" />
+            </button>
           </div>
-          <button 
-            onClick={onClose} 
-            className="w-10 h-10 rounded-xl bg-surface-800 hover:bg-surface-700 flex items-center justify-center transition-colors"
-          >
-            <X className="w-5 h-5 text-surface-400" />
-          </button>
-        </div>
-        
-        <div className="flex-1 overflow-auto p-6">
-          {/* Summary */}
-          <div className="mb-6 p-4 bg-surface-800/50 rounded-xl border border-surface-700/50">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-surface-400 mb-1">一致维度</p>
-                <p className="text-2xl font-bold text-white">
-                  {sample.matchedCount} / {sample.totalDimensions}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-surface-400 mb-1">一致率</p>
-                <p className={clsx(
-                  'text-2xl font-bold',
-                  sample.softMatchRate >= 0.8 ? 'text-green-400' :
-                  sample.softMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
-                )}>
-                  {(sample.softMatchRate * 100).toFixed(0)}%
-                </p>
+          
+          <div className="flex-1 overflow-auto p-6">
+            {/* Summary */}
+            <div className="mb-6 p-4 bg-surface-800/50 rounded-xl border border-surface-700/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-surface-400 mb-1">一致维度</p>
+                  <p className="text-2xl font-bold text-white">
+                    {sample.matchedCount} / {sample.totalDimensions}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-surface-400 mb-1">一致率</p>
+                  <p className={clsx(
+                    'text-2xl font-bold',
+                    sample.softMatchRate >= 0.8 ? 'text-green-400' :
+                    sample.softMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                  )}>
+                    {(sample.softMatchRate * 100).toFixed(0)}%
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Dimension Details */}
-          <h3 className="text-sm font-medium text-surface-400 mb-3">各维度对比</h3>
-          <div className="space-y-3">
-            {sample.dimensionResults.map((dimResult) => (
-              <div 
-                key={dimResult.dimension}
-                className={clsx(
-                  'rounded-xl p-4 border',
-                  dimResult.isMatch 
-                    ? 'bg-green-500/5 border-green-500/20' 
-                    : 'bg-red-500/5 border-red-500/20'
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {dimResult.isMatch ? (
-                      <CheckCircle2 className="w-5 h-5 text-green-400" />
-                    ) : (
-                      <XCircle className="w-5 h-5 text-red-400" />
-                    )}
-                    <span className="font-semibold text-white">
-                      {DIMENSION_LABELS[dimResult.dimension]}
-                    </span>
-                  </div>
-                  <span className={clsx(
-                    'px-2 py-1 rounded text-xs font-bold',
-                    dimResult.isMatch ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                  )}>
-                    {dimResult.isMatch ? '一致' : '不一致'}
-                  </span>
+            {/* Prompt */}
+            {sample.prompt && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-surface-400 mb-2">Prompt</h3>
+                <div className="p-4 bg-surface-800/50 rounded-xl border border-surface-700/50">
+                  <p className="text-surface-200 text-sm whitespace-pre-wrap">{sample.prompt}</p>
                 </div>
-                
-                <div className="mt-3 grid grid-cols-2 gap-4">
-                  <div className="bg-surface-900/50 rounded-lg p-3">
-                    <p className="text-xs text-amber-400 mb-1">Golden Set</p>
-                    <p className={clsx(
-                      'text-lg font-bold',
-                      dimResult.goldenComparison === 'A>B' ? 'text-green-400' :
-                      dimResult.goldenComparison === 'A<B' ? 'text-red-400' : 'text-surface-400'
-                    )}>
-                      {dimResult.goldenComparison}
-                    </p>
-                  </div>
-                  <div className="bg-surface-900/50 rounded-lg p-3">
-                    <p className="text-xs text-sky-400 mb-1">标注结果</p>
-                    <p className={clsx(
-                      'text-lg font-bold',
-                      dimResult.annotatorComparison === 'A>B' ? 'text-green-400' :
-                      dimResult.annotatorComparison === 'A<B' ? 'text-red-400' : 'text-surface-400'
-                    )}>
-                      {dimResult.annotatorComparison}
-                    </p>
+              </div>
+            )}
+
+            {/* First Frame */}
+            {sample.firstFrameUrl && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-surface-400 mb-2">首帧图</h3>
+                <div 
+                  className="relative w-fit cursor-pointer group"
+                  onClick={() => setShowImageModal(true)}
+                >
+                  <img 
+                    src={sample.firstFrameUrl} 
+                    alt="First frame" 
+                    className="max-h-48 rounded-xl border border-surface-700 object-contain"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
+                    <Image className="w-8 h-8 text-white" />
                   </div>
                 </div>
               </div>
-            ))}
+            )}
+
+            {/* Video Compare */}
+            {sample.videoAUrl && sample.videoBUrl && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-surface-400 mb-2">视频对比</h3>
+                <VideoCompare 
+                  videoAUrl={sample.videoAUrl}
+                  videoBUrl={sample.videoBUrl}
+                  modelA={sample.videoAModel || 'Model A'}
+                  modelB={sample.videoBModel || 'Model B'}
+                />
+              </div>
+            )}
+
+            {/* Dimension Details */}
+            <h3 className="text-sm font-medium text-surface-400 mb-3">各维度对比</h3>
+            <div className="space-y-3">
+              {sample.dimensionResults.map((dimResult) => (
+                <div 
+                  key={dimResult.dimension}
+                  className={clsx(
+                    'rounded-xl p-4 border',
+                    dimResult.isMatch 
+                      ? 'bg-green-500/5 border-green-500/20' 
+                      : 'bg-red-500/5 border-red-500/20'
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {dimResult.isMatch ? (
+                        <CheckCircle2 className="w-5 h-5 text-green-400" />
+                      ) : (
+                        <XCircle className="w-5 h-5 text-red-400" />
+                      )}
+                      <span className="font-semibold text-white">
+                        {DIMENSION_LABELS[dimResult.dimension]}
+                      </span>
+                    </div>
+                    <span className={clsx(
+                      'px-2 py-1 rounded text-xs font-bold',
+                      dimResult.isMatch ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                    )}>
+                      {dimResult.isMatch ? '一致' : '不一致'}
+                    </span>
+                  </div>
+                  
+                  <div className="mt-3 grid grid-cols-2 gap-4">
+                    <div className="bg-surface-900/50 rounded-lg p-3">
+                      <p className="text-xs text-amber-400 mb-1">Golden Set</p>
+                      <p className={clsx(
+                        'text-lg font-bold',
+                        dimResult.goldenComparison === 'A>B' ? 'text-green-400' :
+                        dimResult.goldenComparison === 'A<B' ? 'text-red-400' : 'text-surface-400'
+                      )}>
+                        {dimResult.goldenComparison}
+                      </p>
+                    </div>
+                    <div className="bg-surface-900/50 rounded-lg p-3">
+                      <p className="text-xs text-sky-400 mb-1">标注结果</p>
+                      <p className={clsx(
+                        'text-lg font-bold',
+                        dimResult.annotatorComparison === 'A>B' ? 'text-green-400' :
+                        dimResult.annotatorComparison === 'A<B' ? 'text-red-400' : 'text-surface-400'
+                      )}>
+                        {dimResult.annotatorComparison}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      
+      {/* First Frame Image Modal */}
+      {sample.firstFrameUrl && (
+        <ImageModal
+          src={sample.firstFrameUrl}
+          alt="First frame"
+          isOpen={showImageModal}
+          onClose={() => setShowImageModal(false)}
+        />
+      )}
+    </>
   )
 }
 
@@ -981,124 +1110,191 @@ interface ScoreSampleDetailModalProps {
 }
 
 function ScoreSampleDetailModal({ sample, onClose }: ScoreSampleDetailModalProps) {
+  const [showImageModal, setShowImageModal] = useState(false)
+  
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-surface-900 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col border border-surface-800">
-        <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/80">
-          <div>
-            <h2 className="text-lg font-bold text-white">{sample.sampleId}</h2>
-            <p className="text-sm text-surface-400">
-              标注人员: <span className="text-cyan-400">{sample.annotatorId}</span>
-              {sample.videoModel && (
-                <span className="ml-3 text-accent-400">{sample.videoModel}</span>
-              )}
-            </p>
+    <>
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-surface-900 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-surface-800">
+          <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/80">
+            <div>
+              <h2 className="text-lg font-bold text-white">{sample.sampleId}</h2>
+              <p className="text-sm text-surface-400">
+                标注人员: <span className="text-cyan-400">{sample.annotatorId}</span>
+                {sample.videoModel && (
+                  <span className="ml-3 text-accent-400">{sample.videoModel}</span>
+                )}
+              </p>
+            </div>
+            <button 
+              onClick={onClose} 
+              className="w-10 h-10 rounded-xl bg-surface-800 hover:bg-surface-700 flex items-center justify-center transition-colors"
+            >
+              <X className="w-5 h-5 text-surface-400" />
+            </button>
           </div>
-          <button 
-            onClick={onClose} 
-            className="w-10 h-10 rounded-xl bg-surface-800 hover:bg-surface-700 flex items-center justify-center transition-colors"
-          >
-            <X className="w-5 h-5 text-surface-400" />
-          </button>
-        </div>
-        
-        <div className="flex-1 overflow-auto p-6">
-          {/* Summary */}
-          <div className="mb-6 p-4 bg-surface-800/50 rounded-xl border border-surface-700/50">
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <p className="text-sm text-surface-400 mb-1">分数一致</p>
-                <p className="text-2xl font-bold text-white">
-                  {sample.exactMatchCount} / {sample.totalDimensions}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-surface-400 mb-1">等级一致</p>
-                <p className="text-2xl font-bold text-white">
-                  {sample.levelMatchCount} / {sample.totalDimensions}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-surface-400 mb-1">等级一致率</p>
-                <p className={clsx(
-                  'text-2xl font-bold',
-                  sample.softMatchRate >= 0.8 ? 'text-green-400' :
-                  sample.softMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
-                )}>
-                  {(sample.softMatchRate * 100).toFixed(0)}%
-                </p>
+          
+          <div className="flex-1 overflow-auto p-6">
+            {/* Summary */}
+            <div className="mb-6 p-4 bg-surface-800/50 rounded-xl border border-surface-700/50">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-sm text-surface-400 mb-1">分数一致</p>
+                  <p className="text-2xl font-bold text-white">
+                    {sample.exactMatchCount} / {sample.totalDimensions}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-surface-400 mb-1">等级一致</p>
+                  <p className="text-2xl font-bold text-white">
+                    {sample.levelMatchCount} / {sample.totalDimensions}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-surface-400 mb-1">等级一致率</p>
+                  <p className={clsx(
+                    'text-2xl font-bold',
+                    sample.softMatchRate >= 0.8 ? 'text-green-400' :
+                    sample.softMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                  )}>
+                    {(sample.softMatchRate * 100).toFixed(0)}%
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Dimension Details */}
-          <h3 className="text-sm font-medium text-surface-400 mb-3">各维度对比</h3>
-          <div className="space-y-3">
-            {sample.dimensionResults.map((dimResult) => (
-              <div 
-                key={dimResult.dimension}
-                className={clsx(
-                  'rounded-xl p-4 border',
-                  dimResult.isExactMatch 
-                    ? 'bg-green-500/5 border-green-500/20' 
-                    : dimResult.isLevelMatch
-                      ? 'bg-amber-500/5 border-amber-500/20'
-                      : 'bg-red-500/5 border-red-500/20'
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {dimResult.isExactMatch ? (
-                      <CheckCircle2 className="w-5 h-5 text-green-400" />
-                    ) : dimResult.isLevelMatch ? (
-                      <AlertTriangle className="w-5 h-5 text-amber-400" />
-                    ) : (
-                      <XCircle className="w-5 h-5 text-red-400" />
-                    )}
-                    <span className="font-semibold text-white">
-                      {DIMENSION_LABELS[dimResult.dimension]}
-                    </span>
-                  </div>
-                  <span className={clsx(
-                    'px-2 py-1 rounded text-xs font-bold',
-                    dimResult.isExactMatch ? 'bg-green-500/20 text-green-400' :
-                    dimResult.isLevelMatch ? 'bg-amber-500/20 text-amber-400' :
-                    'bg-red-500/20 text-red-400'
-                  )}>
-                    {dimResult.isExactMatch ? '完全一致' : dimResult.isLevelMatch ? '等级一致' : '不一致'}
-                  </span>
-                </div>
-                
-                <div className="mt-3 grid grid-cols-2 gap-4">
-                  <div className="bg-surface-900/50 rounded-lg p-3">
-                    <p className="text-xs text-amber-400 mb-1">Golden Set</p>
-                    <div className="flex items-baseline gap-2">
-                      <span className={clsx('text-2xl font-bold', getScoreColor(dimResult.goldenScore))}>
-                        {dimResult.goldenScore}
-                      </span>
-                      <span className="text-xs text-surface-500">
-                        ({getProblemLevelLabel(dimResult.goldenLevel)})
-                      </span>
-                    </div>
-                  </div>
-                  <div className="bg-surface-900/50 rounded-lg p-3">
-                    <p className="text-xs text-sky-400 mb-1">标注结果</p>
-                    <div className="flex items-baseline gap-2">
-                      <span className={clsx('text-2xl font-bold', getScoreColor(dimResult.annotatorScore))}>
-                        {dimResult.annotatorScore}
-                      </span>
-                      <span className="text-xs text-surface-500">
-                        ({getProblemLevelLabel(dimResult.annotatorLevel)})
-                      </span>
-                    </div>
-                  </div>
+            {/* Prompt */}
+            {sample.prompt && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-surface-400 mb-2">Prompt</h3>
+                <div className="p-4 bg-surface-800/50 rounded-xl border border-surface-700/50">
+                  <p className="text-surface-200 text-sm whitespace-pre-wrap">{sample.prompt}</p>
                 </div>
               </div>
-            ))}
+            )}
+
+            {/* First Frame and Video side by side */}
+            <div className="mb-6 grid grid-cols-2 gap-4">
+              {/* First Frame */}
+              {sample.firstFrameUrl && (
+                <div>
+                  <h3 className="text-sm font-medium text-surface-400 mb-2">首帧图</h3>
+                  <div 
+                    className="relative cursor-pointer group"
+                    onClick={() => setShowImageModal(true)}
+                  >
+                    <img 
+                      src={sample.firstFrameUrl} 
+                      alt="First frame" 
+                      className="w-full aspect-video rounded-xl border border-surface-700 object-cover"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
+                      <Image className="w-8 h-8 text-white" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Video */}
+              {sample.videoUrl && (
+                <div>
+                  <h3 className="text-sm font-medium text-surface-400 mb-2">视频</h3>
+                  <div className="relative">
+                    <video
+                      src={sample.videoUrl}
+                      controls
+                      className="w-full aspect-video rounded-xl bg-black"
+                      playsInline
+                    />
+                    {sample.videoModel && (
+                      <div className="absolute top-3 left-3 px-3 py-1.5 bg-accent-600/90 backdrop-blur-sm rounded-lg text-xs font-bold text-white shadow-lg">
+                        {sample.videoModel}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Dimension Details */}
+            <h3 className="text-sm font-medium text-surface-400 mb-3">各维度对比</h3>
+            <div className="space-y-3">
+              {sample.dimensionResults.map((dimResult) => (
+                <div 
+                  key={dimResult.dimension}
+                  className={clsx(
+                    'rounded-xl p-4 border',
+                    dimResult.isExactMatch 
+                      ? 'bg-green-500/5 border-green-500/20' 
+                      : dimResult.isLevelMatch
+                        ? 'bg-amber-500/5 border-amber-500/20'
+                        : 'bg-red-500/5 border-red-500/20'
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {dimResult.isExactMatch ? (
+                        <CheckCircle2 className="w-5 h-5 text-green-400" />
+                      ) : dimResult.isLevelMatch ? (
+                        <AlertTriangle className="w-5 h-5 text-amber-400" />
+                      ) : (
+                        <XCircle className="w-5 h-5 text-red-400" />
+                      )}
+                      <span className="font-semibold text-white">
+                        {DIMENSION_LABELS[dimResult.dimension]}
+                      </span>
+                    </div>
+                    <span className={clsx(
+                      'px-2 py-1 rounded text-xs font-bold',
+                      dimResult.isExactMatch ? 'bg-green-500/20 text-green-400' :
+                      dimResult.isLevelMatch ? 'bg-amber-500/20 text-amber-400' :
+                      'bg-red-500/20 text-red-400'
+                    )}>
+                      {dimResult.isExactMatch ? '完全一致' : dimResult.isLevelMatch ? '等级一致' : '不一致'}
+                    </span>
+                  </div>
+                  
+                  <div className="mt-3 grid grid-cols-2 gap-4">
+                    <div className="bg-surface-900/50 rounded-lg p-3">
+                      <p className="text-xs text-amber-400 mb-1">Golden Set</p>
+                      <div className="flex items-baseline gap-2">
+                        <span className={clsx('text-2xl font-bold', getScoreColor(dimResult.goldenScore))}>
+                          {dimResult.goldenScore}
+                        </span>
+                        <span className="text-xs text-surface-500">
+                          ({getProblemLevelLabel(dimResult.goldenLevel)})
+                        </span>
+                      </div>
+                    </div>
+                    <div className="bg-surface-900/50 rounded-lg p-3">
+                      <p className="text-xs text-sky-400 mb-1">标注结果</p>
+                      <div className="flex items-baseline gap-2">
+                        <span className={clsx('text-2xl font-bold', getScoreColor(dimResult.annotatorScore))}>
+                          {dimResult.annotatorScore}
+                        </span>
+                        <span className="text-xs text-surface-500">
+                          ({getProblemLevelLabel(dimResult.annotatorLevel)})
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      
+      {/* First Frame Image Modal */}
+      {sample.firstFrameUrl && (
+        <ImageModal
+          src={sample.firstFrameUrl}
+          alt="First frame"
+          isOpen={showImageModal}
+          onClose={() => setShowImageModal(false)}
+        />
+      )}
+    </>
   )
 }
 

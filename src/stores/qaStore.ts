@@ -1,11 +1,17 @@
 import { create } from 'zustand'
+import type { PairSample, ScoreSample, PairTaskPackage, ScoreTaskPackage } from '../types'
 import type {
   PairSampleResult,
   ScoreSampleResult,
   QAPairStats,
   QAScoreStats,
 } from '../types/analysis'
-import { calculatePairQA, calculateScoreQA } from '../utils/analysis/qa'
+import { 
+  calculatePairQA, 
+  calculateScoreQA,
+  type PairSampleDetailsMap,
+  type ScoreSampleDetailsMap,
+} from '../utils/analysis/qa'
 
 type QAMode = 'pair' | 'score'
 
@@ -25,6 +31,10 @@ interface QAState {
   goldenScoreResults: ScoreSampleResult[]
   goldenFileInfo: QAFileInfo | null
   
+  // Sample details maps (from task_package)
+  pairSampleDetailsMap: PairSampleDetailsMap
+  scoreSampleDetailsMap: ScoreSampleDetailsMap
+  
   // Annotator data
   annotatorPairResults: PairSampleResult[]
   annotatorScoreResults: ScoreSampleResult[]
@@ -34,6 +44,10 @@ interface QAState {
   qaPairStats: QAPairStats | null
   qaScoreStats: QAScoreStats | null
   
+  // Annotator selection for filtering
+  selectedAnnotatorId: string | null  // null means "all"
+  annotatorIds: string[]  // List of all annotator IDs
+  
   // Loading state
   isLoading: boolean
   error: string | null
@@ -42,9 +56,12 @@ interface QAState {
   hasGoldenSet: () => boolean
   hasAnnotatorData: () => boolean
   canCalculateQA: () => boolean
+  getFilteredPairStats: () => QAPairStats | null
+  getFilteredScoreStats: () => QAScoreStats | null
   
   // Actions
   setMode: (mode: QAMode) => void
+  setSelectedAnnotatorId: (id: string | null) => void
   loadGoldenSet: (content: unknown, fileName: string) => void
   loadAnnotatorResults: (files: { content: unknown; fileName: string }[]) => void
   calculateQA: () => void
@@ -54,13 +71,18 @@ interface QAState {
 }
 
 // Parse annotation result file
-function parseAnnotationFile(content: unknown): {
+interface ParsedAnnotationFile {
   mode: QAMode
   pairResults: PairSampleResult[]
   scoreResults: ScoreSampleResult[]
   annotatorId: string
   sampleCount: number
-} | null {
+  // Sample details from task_package
+  pairSamples: PairSample[]
+  scoreSamples: ScoreSample[]
+}
+
+function parseAnnotationFile(content: unknown): ParsedAnnotationFile | null {
   const data = content as Record<string, unknown>
   
   if (data.mode === 'pair' && Array.isArray(data.results)) {
@@ -71,12 +93,19 @@ function parseAnnotationFile(content: unknown): {
       ...r,
       annotator_id: r.annotator_id || annotatorId,
     }))
+    
+    // Extract samples from task_package if available
+    const taskPackage = data.task_package as PairTaskPackage | undefined
+    const pairSamples = taskPackage?.samples || []
+    
     return {
       mode: 'pair',
       pairResults: processedResults,
       scoreResults: [],
       annotatorId,
       sampleCount: results.length,
+      pairSamples,
+      scoreSamples: [],
     }
   }
   
@@ -87,16 +116,40 @@ function parseAnnotationFile(content: unknown): {
       ...r,
       annotator_id: r.annotator_id || annotatorId,
     }))
+    
+    // Extract samples from task_package if available
+    const taskPackage = data.task_package as ScoreTaskPackage | undefined
+    const scoreSamples = taskPackage?.samples || []
+    
     return {
       mode: 'score',
       pairResults: [],
       scoreResults: processedResults,
       annotatorId,
       sampleCount: results.length,
+      pairSamples: [],
+      scoreSamples,
     }
   }
   
   return null
+}
+
+// Build sample details map from samples array
+function buildPairSampleDetailsMap(samples: PairSample[]): PairSampleDetailsMap {
+  const map = new Map<string, PairSample>()
+  for (const sample of samples) {
+    map.set(sample.sample_id, sample)
+  }
+  return map
+}
+
+function buildScoreSampleDetailsMap(samples: ScoreSample[]): ScoreSampleDetailsMap {
+  const map = new Map<string, ScoreSample>()
+  for (const sample of samples) {
+    map.set(sample.sample_id, sample)
+  }
+  return map
 }
 
 export const useQAStore = create<QAState>((set, get) => ({
@@ -106,12 +159,18 @@ export const useQAStore = create<QAState>((set, get) => ({
   goldenScoreResults: [],
   goldenFileInfo: null,
   
+  pairSampleDetailsMap: new Map(),
+  scoreSampleDetailsMap: new Map(),
+  
   annotatorPairResults: [],
   annotatorScoreResults: [],
   annotatorFileInfos: [],
   
   qaPairStats: null,
   qaScoreStats: null,
+  
+  selectedAnnotatorId: null,
+  annotatorIds: [],
   
   isLoading: false,
   error: null,
@@ -135,13 +194,72 @@ export const useQAStore = create<QAState>((set, get) => ({
     return state.hasGoldenSet() && state.hasAnnotatorData()
   },
   
+  // Get stats filtered by selected annotator (Pair mode)
+  getFilteredPairStats: () => {
+    const state = get()
+    if (!state.qaPairStats) return null
+    if (!state.selectedAnnotatorId) return state.qaPairStats
+    
+    // Filter stats for selected annotator
+    const annotatorId = state.selectedAnnotatorId
+    const annotatorData = state.qaPairStats.byAnnotator[annotatorId]
+    if (!annotatorData) return null
+    
+    // Filter mismatched samples for this annotator
+    const filteredMismatched = state.qaPairStats.mismatchedSamples.filter(
+      s => s.annotatorId === annotatorId
+    )
+    
+    return {
+      ...state.qaPairStats,
+      totalSamples: annotatorData.total,
+      hardMatchCount: annotatorData.hardMatchCount,
+      hardMatchRate: annotatorData.hardMatchRate,
+      avgSoftMatchRate: annotatorData.avgSoftMatchRate,
+      byAnnotator: { [annotatorId]: annotatorData },
+      mismatchedSamples: filteredMismatched,
+    }
+  },
+  
+  // Get stats filtered by selected annotator (Score mode)
+  getFilteredScoreStats: () => {
+    const state = get()
+    if (!state.qaScoreStats) return null
+    if (!state.selectedAnnotatorId) return state.qaScoreStats
+    
+    // Filter stats for selected annotator
+    const annotatorId = state.selectedAnnotatorId
+    const annotatorData = state.qaScoreStats.byAnnotator[annotatorId]
+    if (!annotatorData) return null
+    
+    // Filter mismatched samples for this annotator
+    const filteredMismatched = state.qaScoreStats.mismatchedSamples.filter(
+      s => s.annotatorId === annotatorId
+    )
+    
+    return {
+      ...state.qaScoreStats,
+      totalSamples: annotatorData.total,
+      hardMatchCount: annotatorData.hardMatchCount,
+      hardMatchRate: annotatorData.hardMatchRate,
+      avgLevelMatchRate: annotatorData.avgLevelMatchRate,
+      byAnnotator: { [annotatorId]: annotatorData },
+      mismatchedSamples: filteredMismatched,
+    }
+  },
+  
   setMode: (mode) => {
     set({
       mode,
       // Clear stats when mode changes
       qaPairStats: null,
       qaScoreStats: null,
+      selectedAnnotatorId: null,
     })
+  },
+  
+  setSelectedAnnotatorId: (id) => {
+    set({ selectedAnnotatorId: id })
   },
   
   loadGoldenSet: (content, fileName) => {
@@ -168,17 +286,27 @@ export const useQAStore = create<QAState>((set, get) => ({
       }
       
       if (mode === 'pair') {
+        // Build sample details map from task_package
+        const pairSampleDetailsMap = buildPairSampleDetailsMap(parsed.pairSamples)
+        
         set({
           goldenPairResults: parsed.pairResults,
           goldenFileInfo: fileInfo,
+          pairSampleDetailsMap,
           qaPairStats: null, // Clear existing stats
+          selectedAnnotatorId: null,
           isLoading: false,
         })
       } else {
+        // Build sample details map from task_package
+        const scoreSampleDetailsMap = buildScoreSampleDetailsMap(parsed.scoreSamples)
+        
         set({
           goldenScoreResults: parsed.scoreResults,
           goldenFileInfo: fileInfo,
+          scoreSampleDetailsMap,
           qaScoreStats: null, // Clear existing stats
+          selectedAnnotatorId: null,
           isLoading: false,
         })
       }
@@ -263,15 +391,31 @@ export const useQAStore = create<QAState>((set, get) => ({
       if (state.mode === 'pair') {
         const stats = calculatePairQA(
           state.goldenPairResults,
-          state.annotatorPairResults
+          state.annotatorPairResults,
+          state.pairSampleDetailsMap
         )
-        set({ qaPairStats: stats, isLoading: false })
+        // Extract unique annotator IDs
+        const annotatorIds = Object.keys(stats.byAnnotator).sort()
+        set({ 
+          qaPairStats: stats, 
+          annotatorIds,
+          selectedAnnotatorId: null,
+          isLoading: false,
+        })
       } else {
         const stats = calculateScoreQA(
           state.goldenScoreResults,
-          state.annotatorScoreResults
+          state.annotatorScoreResults,
+          state.scoreSampleDetailsMap
         )
-        set({ qaScoreStats: stats, isLoading: false })
+        // Extract unique annotator IDs
+        const annotatorIds = Object.keys(stats.byAnnotator).sort()
+        set({ 
+          qaScoreStats: stats,
+          annotatorIds,
+          selectedAnnotatorId: null,
+          isLoading: false,
+        })
       }
     } catch (error) {
       set({
@@ -286,11 +430,15 @@ export const useQAStore = create<QAState>((set, get) => ({
       goldenPairResults: [],
       goldenScoreResults: [],
       goldenFileInfo: null,
+      pairSampleDetailsMap: new Map(),
+      scoreSampleDetailsMap: new Map(),
       annotatorPairResults: [],
       annotatorScoreResults: [],
       annotatorFileInfos: [],
       qaPairStats: null,
       qaScoreStats: null,
+      selectedAnnotatorId: null,
+      annotatorIds: [],
       error: null,
     })
   },
@@ -301,13 +449,19 @@ export const useQAStore = create<QAState>((set, get) => ({
       set({
         goldenPairResults: [],
         goldenFileInfo: null,
+        pairSampleDetailsMap: new Map(),
         qaPairStats: null,
+        selectedAnnotatorId: null,
+        annotatorIds: [],
       })
     } else {
       set({
         goldenScoreResults: [],
         goldenFileInfo: null,
+        scoreSampleDetailsMap: new Map(),
         qaScoreStats: null,
+        selectedAnnotatorId: null,
+        annotatorIds: [],
       })
     }
   },
@@ -319,12 +473,16 @@ export const useQAStore = create<QAState>((set, get) => ({
         annotatorPairResults: [],
         annotatorFileInfos: [],
         qaPairStats: null,
+        selectedAnnotatorId: null,
+        annotatorIds: [],
       })
     } else {
       set({
         annotatorScoreResults: [],
         annotatorFileInfos: [],
         qaScoreStats: null,
+        selectedAnnotatorId: null,
+        annotatorIds: [],
       })
     }
   },

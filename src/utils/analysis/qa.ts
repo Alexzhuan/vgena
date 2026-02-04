@@ -6,7 +6,7 @@
  * - Score mode: Compare Golden Set scores with annotator scores
  */
 
-import type { Dimension } from '../../types'
+import type { Dimension, PairSample, ScoreSample } from '../../types'
 import type {
   PairSampleResult,
   ScoreSampleResult,
@@ -18,6 +18,12 @@ import type {
   QAScoreSampleResult,
   QAScoreStats,
 } from '../../types/analysis'
+
+/**
+ * Sample details map for looking up prompt, firstFrameUrl, videoUrls
+ */
+export type PairSampleDetailsMap = Map<string, PairSample>
+export type ScoreSampleDetailsMap = Map<string, ScoreSample>
 
 const ALL_DIMENSIONS: Dimension[] = [
   'text_consistency',
@@ -59,7 +65,8 @@ export function getProblemLevelLabel(level: QAProblemLevel): string {
  */
 function comparePairSample(
   golden: PairSampleResult,
-  annotator: PairSampleResult
+  annotator: PairSampleResult,
+  sampleDetails?: PairSample
 ): QAPairSampleResult {
   const dimensionResults: QAPairDimensionResult[] = []
   let matchedCount = 0
@@ -94,6 +101,11 @@ function comparePairSample(
     totalDimensions,
     hardMatch,
     softMatchRate,
+    // Sample details from task_package
+    prompt: sampleDetails?.prompt,
+    firstFrameUrl: sampleDetails?.first_frame_url,
+    videoAUrl: sampleDetails?.video_a_url,
+    videoBUrl: sampleDetails?.video_b_url,
     videoAModel: golden.video_a_model,
     videoBModel: golden.video_b_model,
   }
@@ -104,11 +116,13 @@ function comparePairSample(
  * 
  * @param goldenResults - Golden Set results (standard answers)
  * @param annotatorResults - Annotator results to check
+ * @param sampleDetailsMap - Optional map of sample_id to sample details (from task_package)
  * @returns QA statistics for Pair mode
  */
 export function calculatePairQA(
   goldenResults: PairSampleResult[],
-  annotatorResults: PairSampleResult[]
+  annotatorResults: PairSampleResult[],
+  sampleDetailsMap?: PairSampleDetailsMap
 ): QAPairStats {
   // Build a map of golden results by sample_id
   const goldenMap = new Map<string, PairSampleResult>()
@@ -140,7 +154,8 @@ export function calculatePairQA(
       continue
     }
 
-    const sampleResult = comparePairSample(golden, annotatorResult)
+    const sampleDetails = sampleDetailsMap?.get(annotatorResult.sample_id)
+    const sampleResult = comparePairSample(golden, annotatorResult, sampleDetails)
     sampleResults.push(sampleResult)
 
     // Update dimension stats
@@ -219,7 +234,8 @@ export function calculatePairQA(
  */
 function compareScoreSample(
   golden: ScoreSampleResult,
-  annotator: ScoreSampleResult
+  annotator: ScoreSampleResult,
+  sampleDetails?: ScoreSample
 ): QAScoreSampleResult {
   const dimensionResults: QAScoreDimensionResult[] = []
   let exactMatchCount = 0
@@ -265,6 +281,10 @@ function compareScoreSample(
     totalDimensions,
     hardMatch,
     softMatchRate,
+    // Sample details from task_package
+    prompt: sampleDetails?.prompt,
+    firstFrameUrl: sampleDetails?.first_frame_url,
+    videoUrl: sampleDetails?.video_url,
     videoModel: golden.video_model,
   }
 }
@@ -274,11 +294,13 @@ function compareScoreSample(
  * 
  * @param goldenResults - Golden Set results (standard answers)
  * @param annotatorResults - Annotator results to check
+ * @param sampleDetailsMap - Optional map of sample_id to sample details (from task_package)
  * @returns QA statistics for Score mode
  */
 export function calculateScoreQA(
   goldenResults: ScoreSampleResult[],
-  annotatorResults: ScoreSampleResult[]
+  annotatorResults: ScoreSampleResult[],
+  sampleDetailsMap?: ScoreSampleDetailsMap
 ): QAScoreStats {
   // Build a map of golden results by sample_id
   const goldenMap = new Map<string, ScoreSampleResult>()
@@ -316,7 +338,8 @@ export function calculateScoreQA(
       continue
     }
 
-    const sampleResult = compareScoreSample(golden, annotatorResult)
+    const sampleDetails = sampleDetailsMap?.get(annotatorResult.sample_id)
+    const sampleResult = compareScoreSample(golden, annotatorResult, sampleDetails)
     sampleResults.push(sampleResult)
 
     // Update dimension stats

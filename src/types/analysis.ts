@@ -208,7 +208,11 @@ export interface QAPairSampleResult {
   totalDimensions: number  // Always 5
   hardMatch: boolean  // All 5 dimensions match
   softMatchRate: number  // matchedCount / 5
+  // Sample details for preview
   prompt?: string
+  firstFrameUrl?: string
+  videoAUrl?: string
+  videoBUrl?: string
   videoAModel?: string
   videoBModel?: string
 }
@@ -238,7 +242,10 @@ export interface QAScoreSampleResult {
   totalDimensions: number  // Always 5
   hardMatch: boolean  // All 5 dimensions have exact score match
   softMatchRate: number  // levelMatchCount / 5
+  // Sample details for preview
   prompt?: string
+  firstFrameUrl?: string
+  videoUrl?: string
   videoModel?: string
 }
 
