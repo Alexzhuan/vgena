@@ -11,6 +11,7 @@ import type {
 } from '../../types/analysis'
 import type { Dimension } from '../../types'
 import { getProblemLevelLabel } from '../../utils/analysis/qa'
+import { exportQAToExcel } from '../../utils/analysis/exportQA'
 import { 
   Upload, 
   X, 
@@ -24,6 +25,7 @@ import {
   Image,
   Users,
   ChevronDown,
+  Download,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -144,15 +146,28 @@ export function AnalysisQA() {
             </button>
           </div>
 
-          {(hasGoldenSet() || hasAnnotatorData()) && (
-            <button
-              onClick={clearAll}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-surface-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              清空所有
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Export Button - only show when stats exist */}
+            {stats && (
+              <button
+                onClick={() => exportQAToExcel(stats)}
+                className="flex items-center gap-2 px-4 py-2 text-sm text-surface-400 hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                导出 Excel
+              </button>
+            )}
+            
+            {(hasGoldenSet() || hasAnnotatorData()) && (
+              <button
+                onClick={clearAll}
+                className="flex items-center gap-2 px-4 py-2 text-sm text-surface-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                清空所有
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Error Display */}
