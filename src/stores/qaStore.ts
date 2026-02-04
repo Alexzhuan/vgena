@@ -5,8 +5,6 @@ import type {
   ScoreSampleResult,
   QAPairStats,
   QAScoreStats,
-  QAPairDimensionMismatch,
-  QAScoreDimensionMismatch,
 } from '../types/analysis'
 import type { Dimension } from '../types'
 import { 

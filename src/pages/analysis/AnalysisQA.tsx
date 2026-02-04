@@ -8,8 +8,6 @@ import type {
   QAScoreSampleResult,
   QAPairStats,
   QAScoreStats,
-  QAScoreDimensionMismatch,
-  QAPairDimensionMismatch,
 } from '../../types/analysis'
 import type { Dimension } from '../../types'
 import { getProblemLevelLabel } from '../../utils/analysis/qa'
