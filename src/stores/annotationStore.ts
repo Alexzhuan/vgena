@@ -142,8 +142,8 @@ interface AnnotationState {
   // Check if a specific dimension is complete (for pair mode)
   isDimensionComplete: (dimension: Dimension) => boolean
   
-  // Export all results
-  exportResults: () => string
+  // Export all results (optionally override annotator ID)
+  exportResults: (overrideAnnotatorId?: string) => string
   
   // Internal helper to update dirty status based on comparison with saved result
   _updateDirtyStatus: () => void
@@ -760,10 +760,13 @@ export const useAnnotationStore = create<AnnotationState>()(
         return 'pending'
       },
       
-      // Export
-      exportResults: () => {
+      // Export (optionally override annotator ID)
+      exportResults: (overrideAnnotatorId?: string) => {
         const { taskPackage, results, doubtfulSamples, drafts } = get()
         if (!taskPackage) return '{}'
+        
+        // Use override annotator ID if provided, otherwise use taskPackage's
+        const annotatorId = overrideAnnotatorId || taskPackage.annotator_id
         
         // Create a map of sample_id to sample for quick lookup
         const sampleMap = new Map(
@@ -796,9 +799,15 @@ export const useAnnotationStore = create<AnnotationState>()(
           draftsObject[key] = value
         })
         
+        // Create task_package copy with updated annotator_id
+        const taskPackageWithUpdatedAnnotator = {
+          ...taskPackage,
+          annotator_id: annotatorId,
+        }
+        
         const exportData = {
           task_id: taskPackage.task_id,
-          annotator_id: taskPackage.annotator_id,
+          annotator_id: annotatorId,
           mode: taskPackage.mode,
           total_samples: taskPackage.samples.length,
           completed_samples: results.size,
@@ -806,8 +815,8 @@ export const useAnnotationStore = create<AnnotationState>()(
           doubtful_sample_ids: Array.from(doubtfulSamples),
           drafts: draftsObject,
           exported_at: new Date().toISOString(),
-          // Include full task package for rework support
-          task_package: taskPackage,
+          // Include full task package for rework support (with updated annotator_id)
+          task_package: taskPackageWithUpdatedAnnotator,
           results: resultsWithModel,
         }
         

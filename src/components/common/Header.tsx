@@ -4,6 +4,7 @@ import { useAnnotationStore } from '../../stores/annotationStore'
 import type { SampleStatus } from '../../stores/annotationStore'
 import { downloadJSON } from '../../utils'
 import { ConfirmDialog } from './ConfirmDialog'
+import { InputDialog } from './InputDialog'
 import { 
   Download, 
   FolderOpen, 
@@ -20,6 +21,9 @@ import {
 import clsx from 'clsx'
 
 type FilterTab = 'all' | 'completed' | 'doubtful' | 'pending'
+
+// LocalStorage key for remembering annotator ID
+const ANNOTATOR_ID_STORAGE_KEY = 'vgena_annotator_id'
 
 export function Header() {
   const { 
@@ -38,11 +42,21 @@ export function Header() {
   const [filterTab, setFilterTab] = useState<FilterTab>('all')
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false)
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
+  const [isAnnotatorIdDialogOpen, setIsAnnotatorIdDialogOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const panelRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const stats = getCompletionStats()
+
+  // Get the default annotator ID (from localStorage or taskPackage)
+  const getDefaultAnnotatorId = (): string => {
+    // First try localStorage
+    const savedId = localStorage.getItem(ANNOTATOR_ID_STORAGE_KEY)
+    if (savedId) return savedId
+    // Fall back to taskPackage annotator_id
+    return taskPackage?.annotator_id || ''
+  }
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -133,32 +147,36 @@ export function Header() {
     
     const warnings = getExportWarnings()
     
-    // If there are any warnings, show confirmation dialog
+    // If there are any warnings, show confirmation dialog first
     if (warnings.length > 0) {
       setIsExportDialogOpen(true)
       return
     }
     
-    // No warnings, export directly
-    doExport()
+    // No warnings, show annotator ID dialog directly
+    setIsAnnotatorIdDialogOpen(true)
   }
 
-  const doExport = () => {
+  const doExport = (annotatorId: string) => {
     if (!taskPackage) return
-    const data = exportResults()
-    const stats = getCompletionStats()
+    
+    // Save annotator ID to localStorage for next time
+    localStorage.setItem(ANNOTATOR_ID_STORAGE_KEY, annotatorId)
+    
+    const data = exportResults(annotatorId)
+    const currentStats = getCompletionStats()
     
     // 格式化时间戳: YYYYMMDD_HHmmss
     const now = new Date()
     const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
     const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '')
     
-    // 构建详细文件名
+    // 构建详细文件名 - 使用用户输入的 annotatorId
     const filename = [
       'annotation',
       taskPackage.task_id,
-      taskPackage.annotator_id,
-      `${stats.completed}-${stats.total}`,
+      annotatorId,
+      `${currentStats.completed}-${currentStats.total}`,
       `${dateStr}_${timeStr}`
     ].join('_') + '.json'
     
@@ -167,11 +185,21 @@ export function Header() {
 
   const handleConfirmExport = () => {
     setIsExportDialogOpen(false)
-    doExport()
+    // After confirming warnings, show annotator ID dialog
+    setIsAnnotatorIdDialogOpen(true)
   }
 
   const handleCancelExport = () => {
     setIsExportDialogOpen(false)
+  }
+
+  const handleConfirmAnnotatorId = (annotatorId: string) => {
+    setIsAnnotatorIdDialogOpen(false)
+    doExport(annotatorId)
+  }
+
+  const handleCancelAnnotatorId = () => {
+    setIsAnnotatorIdDialogOpen(false)
   }
 
   const getExportDialogMessage = () => {
@@ -595,6 +623,19 @@ export function Header() {
         onConfirm={handleConfirmExport}
         onCancel={handleCancelExport}
         variant="warning"
+      />
+
+      {/* Annotator ID input dialog */}
+      <InputDialog
+        isOpen={isAnnotatorIdDialogOpen}
+        title="填写标注人ID"
+        label="请输入您的标注人ID"
+        placeholder="例如: annotator_001"
+        defaultValue={getDefaultAnnotatorId()}
+        confirmText="确认导出"
+        cancelText="取消"
+        onConfirm={handleConfirmAnnotatorId}
+        onCancel={handleCancelAnnotatorId}
       />
     </header>
   )
