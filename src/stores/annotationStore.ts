@@ -78,6 +78,9 @@ interface AnnotationState {
   // Doubtful samples tracking
   doubtfulSamples: Set<string>
   
+  // Dirty samples tracking (modified but not saved)
+  dirtySamples: Set<string>
+  
   // Drafts for incomplete annotations (saved when marking as doubtful or navigating away)
   drafts: Map<string, DraftData>
   
@@ -127,8 +130,8 @@ interface AnnotationState {
   markAsDoubtful: () => void
   removeDoubt: (sampleId: string) => void
   
-  // Get completion stats (now includes doubtful count)
-  getCompletionStats: () => { completed: number; doubtful: number; total: number }
+  // Get completion stats (now includes doubtful and modified count)
+  getCompletionStats: () => { completed: number; doubtful: number; modified: number; pending: number; total: number }
   
   // Get sample status by index
   getSampleStatus: (index: number) => SampleStatus
@@ -141,6 +144,12 @@ interface AnnotationState {
   
   // Export all results
   exportResults: () => string
+  
+  // Internal helper to update dirty status based on comparison with saved result
+  _updateDirtyStatus: () => void
+  
+  // Internal helper to check if current draft matches saved result
+  _isCurrentDraftMatchingSavedResult: () => boolean
 }
 
 const createEmptyDimensionPairDraft = (): DimensionPairDraft => ({
@@ -178,6 +187,7 @@ export const useAnnotationStore = create<AnnotationState>()(
       currentSampleIndex: 0,
       results: new Map(),
       doubtfulSamples: new Set(),
+      dirtySamples: new Set(),
       drafts: new Map(),
       currentChecklist: {},
       currentPairDraft: createEmptyPairDraft(),
@@ -190,6 +200,7 @@ export const useAnnotationStore = create<AnnotationState>()(
           currentSampleIndex: 0,
           results: new Map(),
           doubtfulSamples: new Set(),
+          dirtySamples: new Set(),
           drafts: new Map(),
           currentChecklist: {},
           currentPairDraft: createEmptyPairDraft(),
@@ -225,6 +236,7 @@ export const useAnnotationStore = create<AnnotationState>()(
           currentSampleIndex: 0,
           results: resultsMap,
           doubtfulSamples: doubtfulSet,
+          dirtySamples: new Set(),
           drafts: draftsMap,
           currentChecklist: {},
           currentPairDraft: createEmptyPairDraft(),
@@ -244,6 +256,7 @@ export const useAnnotationStore = create<AnnotationState>()(
           currentSampleIndex: 0,
           results: new Map(),
           doubtfulSamples: new Set(),
+          dirtySamples: new Set(),
           drafts: new Map(),
           currentChecklist: {},
           currentPairDraft: createEmptyPairDraft(),
@@ -327,6 +340,87 @@ export const useAnnotationStore = create<AnnotationState>()(
         }
       },
       
+      // Helper to check if current draft matches saved result
+      _isCurrentDraftMatchingSavedResult: () => {
+        const { taskPackage, currentSampleIndex, results, currentChecklist, currentPairDraft, currentScoreDraft } = get()
+        if (!taskPackage) return false
+        
+        const sample = taskPackage.samples[currentSampleIndex]
+        const savedResult = results.get(sample.sample_id)
+        if (!savedResult) return false
+        
+        // Helper to compare strings (trim and handle undefined/null)
+        const strEq = (a: string | undefined, b: string | undefined): boolean => {
+          return (a || '').trim() === (b || '').trim()
+        }
+        
+        // Compare checklist
+        const savedChecklist = savedResult.checklist_results || {}
+        const checklistKeys = new Set([...Object.keys(savedChecklist), ...Object.keys(currentChecklist)])
+        for (const key of checklistKeys) {
+          if (Boolean(savedChecklist[key]) !== Boolean(currentChecklist[key])) {
+            return false
+          }
+        }
+        
+        if (taskPackage.mode === 'pair') {
+          const pairResult = savedResult as PairAnnotationResult
+          
+          for (const dim of DIMENSIONS) {
+            const savedDim = pairResult.dimensions[dim]
+            const currentDim = currentPairDraft[dim]
+            
+            if (!savedDim) return false
+            
+            // Compare all fields
+            if (!strEq(savedDim.video_a.major_reason, currentDim.video_a_major_reason)) return false
+            if (!strEq(savedDim.video_a.minor_reason, currentDim.video_a_minor_reason)) return false
+            if (!strEq(savedDim.video_b.major_reason, currentDim.video_b_major_reason)) return false
+            if (!strEq(savedDim.video_b.minor_reason, currentDim.video_b_minor_reason)) return false
+            if (savedDim.comparison !== currentDim.comparison) return false
+            if (!strEq(savedDim.degree_diff_reason, currentDim.degree_diff_reason)) return false
+          }
+        } else {
+          const scoreResult = savedResult as ScoreAnnotationResult
+          
+          for (const dim of DIMENSIONS) {
+            const savedScore = scoreResult.scores[dim]
+            const currentScore = currentScoreDraft.scores[dim]
+            
+            if (savedScore.score !== currentScore.score) return false
+            if (!strEq(savedScore.major_reason, currentScore.major_reason)) return false
+            if (!strEq(savedScore.minor_reason, currentScore.minor_reason)) return false
+          }
+        }
+        
+        return true
+      },
+      
+      // Helper to update dirty status based on comparison with saved result
+      _updateDirtyStatus: () => {
+        const { taskPackage, currentSampleIndex, results, dirtySamples } = get()
+        if (!taskPackage) return
+        
+        const sample = taskPackage.samples[currentSampleIndex]
+        // Only relevant for samples that have been saved
+        if (!results.has(sample.sample_id)) return
+        
+        const isMatching = get()._isCurrentDraftMatchingSavedResult()
+        const isDirty = dirtySamples.has(sample.sample_id)
+        
+        if (isMatching && isDirty) {
+          // Draft matches saved result, remove from dirty
+          const newDirtySamples = new Set(dirtySamples)
+          newDirtySamples.delete(sample.sample_id)
+          set({ dirtySamples: newDirtySamples })
+        } else if (!isMatching && !isDirty) {
+          // Draft differs from saved result, add to dirty
+          const newDirtySamples = new Set(dirtySamples)
+          newDirtySamples.add(sample.sample_id)
+          set({ dirtySamples: newDirtySamples })
+        }
+      },
+      
       // Checklist
       toggleChecklistItem: (itemId) => {
         set((state) => ({
@@ -335,6 +429,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             [itemId]: !state.currentChecklist[itemId],
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       setChecklistItem: (itemId, checked) => {
@@ -344,6 +439,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             [itemId]: checked,
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       // Pair mode - dimension-based (level is auto-inferred from reasons)
@@ -354,6 +450,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             [dimension]: { ...state.currentPairDraft[dimension], video_a_major_reason: reason },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       setPairDimensionVideoAMinorReason: (dimension, reason) => {
@@ -363,6 +460,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             [dimension]: { ...state.currentPairDraft[dimension], video_a_minor_reason: reason },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       setPairDimensionVideoBMajorReason: (dimension, reason) => {
@@ -372,6 +470,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             [dimension]: { ...state.currentPairDraft[dimension], video_b_major_reason: reason },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       setPairDimensionVideoBMinorReason: (dimension, reason) => {
@@ -381,6 +480,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             [dimension]: { ...state.currentPairDraft[dimension], video_b_minor_reason: reason },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       setPairDimensionComparison: (dimension, comparison) => {
@@ -390,6 +490,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             [dimension]: { ...state.currentPairDraft[dimension], comparison },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       setPairDimensionDegreeDiff: (dimension, reason) => {
@@ -399,6 +500,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             [dimension]: { ...state.currentPairDraft[dimension], degree_diff_reason: reason },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       // Score mode
@@ -411,6 +513,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       setDimensionMajorReason: (dimension, reason) => {
@@ -422,6 +525,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       setDimensionMinorReason: (dimension, reason) => {
@@ -433,6 +537,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             },
           },
         }))
+        get()._updateDirtyStatus()
       },
       
       // Check if a dimension is complete for pair mode
@@ -472,7 +577,7 @@ export const useAnnotationStore = create<AnnotationState>()(
       // Save
       saveCurrentAnnotation: () => {
         const state = get()
-        const { taskPackage, currentSampleIndex, currentChecklist, currentPairDraft, currentScoreDraft, results, drafts, doubtfulSamples } = state
+        const { taskPackage, currentSampleIndex, currentChecklist, currentPairDraft, currentScoreDraft, results, drafts, doubtfulSamples, dirtySamples } = state
         
         if (!taskPackage) return false
         if (!state.isCurrentAnnotationValid()) return false
@@ -483,11 +588,14 @@ export const useAnnotationStore = create<AnnotationState>()(
         const newResults = new Map(results)
         const newDrafts = new Map(drafts)
         const newDoubtfulSamples = new Set(doubtfulSamples)
+        const newDirtySamples = new Set(dirtySamples)
         
         // Clear draft for this sample since it's now complete
         newDrafts.delete(sample.sample_id)
         // Also remove from doubtful if it was marked
         newDoubtfulSamples.delete(sample.sample_id)
+        // Clear dirty flag since we're saving
+        newDirtySamples.delete(sample.sample_id)
         
         if (taskPackage.mode === 'pair') {
           const dimensions: Record<Dimension, DimensionPairAnnotation> = {} as Record<Dimension, DimensionPairAnnotation>
@@ -531,7 +639,7 @@ export const useAnnotationStore = create<AnnotationState>()(
           newResults.set(sample.sample_id, result)
         }
         
-        set({ results: newResults, drafts: newDrafts, doubtfulSamples: newDoubtfulSamples })
+        set({ results: newResults, drafts: newDrafts, doubtfulSamples: newDoubtfulSamples, dirtySamples: newDirtySamples })
         return true
       },
       
@@ -607,25 +715,46 @@ export const useAnnotationStore = create<AnnotationState>()(
         set({ doubtfulSamples: newDoubtfulSamples })
       },
       
-      // Stats (now includes doubtful count)
+      // Stats (now includes doubtful, modified and pending count)
       getCompletionStats: () => {
-        const { taskPackage, results, doubtfulSamples } = get()
-        if (!taskPackage) return { completed: 0, doubtful: 0, total: 0 }
+        const { taskPackage, results, doubtfulSamples, dirtySamples } = get()
+        if (!taskPackage) return { completed: 0, doubtful: 0, modified: 0, pending: 0, total: 0 }
+        
+        // Count samples that are truly completed (in results but not dirty)
+        let completed = 0
+        let modified = 0
+        
+        for (const sampleId of results.keys()) {
+          if (dirtySamples.has(sampleId)) {
+            modified++
+          } else {
+            completed++
+          }
+        }
+        
+        // Pending = total - completed - modified - doubtful
+        // Note: doubtful samples may overlap with results/dirty, so we need to be careful
+        const pending = taskPackage.samples.length - completed - modified - doubtfulSamples.size
+        
         return {
-          completed: results.size,
+          completed,
           doubtful: doubtfulSamples.size,
+          modified,
+          pending: Math.max(0, pending),
           total: taskPackage.samples.length,
         }
       },
       
       // Get sample status by index
       getSampleStatus: (index) => {
-        const { taskPackage, results, doubtfulSamples } = get()
+        const { taskPackage, results, doubtfulSamples, dirtySamples } = get()
         if (!taskPackage || index < 0 || index >= taskPackage.samples.length) {
           return 'pending'
         }
         
         const sampleId = taskPackage.samples[index].sample_id
+        // Dirty samples (modified but not saved) should show as pending
+        if (dirtySamples.has(sampleId)) return 'pending'
         if (results.has(sampleId)) return 'completed'
         if (doubtfulSamples.has(sampleId)) return 'doubtful'
         return 'pending'
@@ -686,7 +815,7 @@ export const useAnnotationStore = create<AnnotationState>()(
       },
     }),
     {
-      name: 'annotation-storage-v5', // Version bump for drafts feature
+      name: 'annotation-storage-v6', // Version bump for dirtySamples feature
       // Custom serialization for Map and Set
       storage: {
         getItem: (name) => {
@@ -703,6 +832,12 @@ export const useAnnotationStore = create<AnnotationState>()(
             } else {
               parsed.state.doubtfulSamples = new Set()
             }
+            // Convert dirtySamples array back to Set
+            if (parsed.state?.dirtySamples) {
+              parsed.state.dirtySamples = new Set(parsed.state.dirtySamples)
+            } else {
+              parsed.state.dirtySamples = new Set()
+            }
             // Convert drafts object back to Map
             if (parsed.state?.drafts) {
               parsed.state.drafts = new Map(Object.entries(parsed.state.drafts))
@@ -715,6 +850,7 @@ export const useAnnotationStore = create<AnnotationState>()(
               // Old format detected (v2), clear it
               console.warn('Old annotation data format (v2) detected, resetting...')
               localStorage.removeItem(name)
+              localStorage.removeItem('annotation-storage-v5')
               localStorage.removeItem('annotation-storage-v4')
               localStorage.removeItem('annotation-storage-v3')
               localStorage.removeItem('annotation-storage-v2')
@@ -740,6 +876,9 @@ export const useAnnotationStore = create<AnnotationState>()(
                 doubtfulSamples: value.state.doubtfulSamples instanceof Set
                   ? Array.from(value.state.doubtfulSamples)
                   : value.state.doubtfulSamples || [],
+                dirtySamples: value.state.dirtySamples instanceof Set
+                  ? Array.from(value.state.dirtySamples)
+                  : value.state.dirtySamples || [],
                 drafts: value.state.drafts instanceof Map
                   ? Object.fromEntries(value.state.drafts)
                   : value.state.drafts || {},

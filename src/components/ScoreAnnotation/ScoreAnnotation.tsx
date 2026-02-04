@@ -69,6 +69,24 @@ export function ScoreAnnotation({ sample }: ScoreAnnotationProps) {
     }
   }, [isValid, saveCurrentAnnotation, goToNextSample])
 
+  // Helper to check if a score is disabled based on reasons
+  const isScoreDisabledForDimension = (s: number): boolean => {
+    const majorReason = currentScoreDraft.scores[activeDimension].major_reason
+    const minorReason = currentScoreDraft.scores[activeDimension].minor_reason
+    const hasMajorReason = majorReason.trim().length > 0
+    const hasMinorReason = minorReason.trim().length > 0
+
+    if (hasMajorReason) {
+      // Major issues noted -> cannot select 3, 4, 5
+      return s >= 3
+    }
+    if (hasMinorReason) {
+      // Only minor issues noted -> cannot select 1, 2
+      return s <= 2
+    }
+    return false
+  }
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -76,10 +94,14 @@ export function ScoreAnnotation({ sample }: ScoreAnnotationProps) {
         return
       }
 
-      // Score shortcuts (1-5)
+      // Score shortcuts (1-5) - respect disabled scores
       if (e.key >= '1' && e.key <= '5') {
         e.preventDefault()
-        setDimensionScore(activeDimension, parseInt(e.key))
+        const scoreValue = parseInt(e.key)
+        // Only set score if it's not disabled
+        if (!isScoreDisabledForDimension(scoreValue)) {
+          setDimensionScore(activeDimension, scoreValue)
+        }
         return
       }
 
@@ -124,7 +146,7 @@ export function ScoreAnnotation({ sample }: ScoreAnnotationProps) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeDimension, goToPrevSample, goToNextSample, handleSaveAndNext, setDimensionScore])
+  }, [activeDimension, goToPrevSample, goToNextSample, handleSaveAndNext, setDimensionScore, currentScoreDraft, isScoreDisabledForDimension])
 
   const isFirst = currentSampleIndex === 0
   const isLast = taskPackage ? currentSampleIndex === taskPackage.samples.length - 1 : true
@@ -416,6 +438,32 @@ function DimensionScorePanel({
   const templates = PROBLEM_TEMPLATES[dimension]
   const hasAnyReason = majorReason.trim() || minorReason.trim()
 
+  // Determine which scores are disabled based on reasons
+  const hasMajorReason = majorReason.trim().length > 0
+  const hasMinorReason = minorReason.trim().length > 0
+
+  const isScoreDisabled = (s: number): boolean => {
+    if (hasMajorReason) {
+      // Major issues noted -> cannot select 3, 4, 5
+      return s >= 3
+    }
+    if (hasMinorReason) {
+      // Only minor issues noted -> cannot select 1, 2
+      return s <= 2
+    }
+    return false
+  }
+
+  const getDisabledReason = (s: number): string | undefined => {
+    if (hasMajorReason && s >= 3) {
+      return '已填写主要问题，不可选择3-5分'
+    }
+    if (!hasMajorReason && hasMinorReason && s <= 2) {
+      return '仅填写次要问题，不可选择1-2分'
+    }
+    return undefined
+  }
+
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
       {/* Description */}
@@ -509,19 +557,25 @@ function DimensionScorePanel({
         <div className="flex gap-2">
           {[5, 4, 3, 2, 1].map((s) => {
             const scoreInfo = SCORE_LABELS[s]
+            const disabled = isScoreDisabled(s)
+            const disabledReason = getDisabledReason(s)
             return (
               <button
                 key={s}
-                onClick={() => onScoreChange(s)}
+                onClick={() => !disabled && onScoreChange(s)}
+                disabled={disabled}
+                title={disabledReason}
                 className={clsx(
                   'flex-1 py-3 rounded-lg transition-all border-2',
-                  score === s
-                    ? s >= 4 
-                      ? 'bg-green-600/20 border-green-500 text-green-400' 
-                      : s === 3 
-                        ? 'bg-yellow-600/20 border-yellow-500 text-yellow-400' 
-                        : 'bg-red-600/20 border-red-500 text-red-400'
-                    : 'bg-surface-800 border-surface-600 text-surface-300 hover:border-surface-500'
+                  disabled
+                    ? 'bg-surface-800/50 border-surface-700 text-surface-600 cursor-not-allowed opacity-50'
+                    : score === s
+                      ? s >= 4 
+                        ? 'bg-green-600/20 border-green-500 text-green-400' 
+                        : s === 3 
+                          ? 'bg-yellow-600/20 border-yellow-500 text-yellow-400' 
+                          : 'bg-red-600/20 border-red-500 text-red-400'
+                      : 'bg-surface-800 border-surface-600 text-surface-300 hover:border-surface-500'
                 )}
               >
                 <div className="text-2xl font-bold">{s}</div>

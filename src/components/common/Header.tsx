@@ -37,6 +37,7 @@ export function Header() {
   const [isPanelOpen, setIsPanelOpen] = useState(false)
   const [filterTab, setFilterTab] = useState<FilterTab>('all')
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false)
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const panelRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -105,11 +106,64 @@ export function Header() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isPanelOpen, taskPackage, openPanelWithSearch])
 
+  // Check if there are any issues that should trigger export warning
+  const getExportWarnings = () => {
+    const warnings: string[] = []
+    
+    // Check for pending samples (not completed)
+    if (stats.pending > 0) {
+      warnings.push(`${stats.pending} 条未完成`)
+    }
+    
+    // Check for modified samples (edited but not saved)
+    if (stats.modified > 0) {
+      warnings.push(`${stats.modified} 条已修改未保存`)
+    }
+    
+    // Check for doubtful samples
+    if (stats.doubtful > 0) {
+      warnings.push(`${stats.doubtful} 条存疑`)
+    }
+    
+    return warnings
+  }
+
   const handleExport = () => {
+    if (!taskPackage) return
+    
+    const warnings = getExportWarnings()
+    
+    // If there are any warnings, show confirmation dialog
+    if (warnings.length > 0) {
+      setIsExportDialogOpen(true)
+      return
+    }
+    
+    // No warnings, export directly
+    doExport()
+  }
+
+  const doExport = () => {
     if (!taskPackage) return
     const data = exportResults()
     const filename = `annotation_${taskPackage.task_id}_${new Date().toISOString().split('T')[0]}.json`
     downloadJSON(data, filename)
+  }
+
+  const handleConfirmExport = () => {
+    setIsExportDialogOpen(false)
+    doExport()
+  }
+
+  const handleCancelExport = () => {
+    setIsExportDialogOpen(false)
+  }
+
+  const getExportDialogMessage = () => {
+    const warnings = getExportWarnings()
+    if (warnings.length === 0) return ''
+    
+    return `当前任务存在以下问题：\n\n• ${warnings.join('\n• ')}\n\n建议先保存所有标注再导出。确定要继续导出吗？`
   }
 
   const handleSampleClick = (index: number) => {
@@ -131,9 +185,20 @@ export function Header() {
   }
 
   const getCloseDialogMessage = () => {
-    const hasUnsaved = stats.completed < stats.total
-    if (hasUnsaved) {
-      return `当前任务尚有 ${stats.total - stats.completed} 条未完成标注。\n\n建议先导出结果再关闭，以免丢失标注进度。`
+    const warnings: string[] = []
+    
+    if (stats.pending > 0) {
+      warnings.push(`${stats.pending} 条未完成`)
+    }
+    if (stats.modified > 0) {
+      warnings.push(`${stats.modified} 条已修改未保存`)
+    }
+    if (stats.doubtful > 0) {
+      warnings.push(`${stats.doubtful} 条存疑`)
+    }
+    
+    if (warnings.length > 0) {
+      return `当前任务存在以下问题：\n\n• ${warnings.join('\n• ')}\n\n建议先导出结果再关闭，以免丢失标注进度。`
     }
     return '确定要关闭当前任务吗？'
   }
@@ -502,6 +567,18 @@ export function Header() {
         cancelText="取消关闭"
         onConfirm={handleConfirmClose}
         onCancel={handleCancelClose}
+        variant="warning"
+      />
+
+      {/* Export confirmation dialog */}
+      <ConfirmDialog
+        isOpen={isExportDialogOpen}
+        title="导出确认"
+        message={getExportDialogMessage()}
+        confirmText="继续导出"
+        cancelText="返回保存"
+        onConfirm={handleConfirmExport}
+        onCancel={handleCancelExport}
         variant="warning"
       />
     </header>
