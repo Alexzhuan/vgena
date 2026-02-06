@@ -682,7 +682,8 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
         </div>
       </div>
 
-      {/* Per-Sample Accuracy */}
+      {/* Per-Sample Accuracy - hide when viewing single annotator */}
+      {showAnnotatorTable && (
       <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
         <div className="px-6 py-4 border-b border-surface-800 bg-surface-900/50">
           <h2 className="text-lg font-semibold text-white">
@@ -797,6 +798,7 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
           )}
         </div>
       </div>
+      )}
 
       {/* Annotator Breakdown - only show when viewing all annotators */}
       {showAnnotatorTable && Object.keys(dimensionAnnotatorStats).length > 1 && (
@@ -1329,7 +1331,8 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
         </div>
       </div>
 
-      {/* Per-Sample Accuracy */}
+      {/* Per-Sample Accuracy - hide when viewing single annotator */}
+      {showAnnotatorTable && (
       <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
         <div className="px-6 py-4 border-b border-surface-800 bg-surface-900/50">
           <h2 className="text-lg font-semibold text-white">
@@ -1428,6 +1431,7 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
           )}
         </div>
       </div>
+      )}
 
       {/* Annotator Breakdown - only show when viewing all annotators */}
       {showAnnotatorTable && Object.keys(dimensionAnnotatorStats).length > 1 && (
