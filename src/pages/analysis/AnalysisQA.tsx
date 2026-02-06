@@ -26,6 +26,7 @@ import {
   Users,
   ChevronDown,
   Download,
+  ArrowUpDown,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -462,7 +463,10 @@ interface PairQAResultsProps {
 function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, showAnnotatorTable = true }: PairQAResultsProps) {
   const [selectedDimension, setSelectedDimension] = useState<Dimension | 'all'>('all')
   const [matchView, setMatchView] = useState<PairMatchView>('soft')
-  
+  const [sampleSortField, setSampleSortField] = useState<'accuracy' | 'annotatorCount'>('accuracy')
+  const [sampleSortOrder, setSampleSortOrder] = useState<'asc' | 'desc'>('asc')
+  const [multiAnnotatorSampleId, setMultiAnnotatorSampleId] = useState<string | null>(null)
+
   // Filter dimension mismatches based on search and dimension filter (for Soft Match view)
   const filteredDimensionMismatches = useMemo(() => {
     let filtered = stats.dimensionMismatches
@@ -535,6 +539,74 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
     
     return result
   }, [stats.allSampleResults, stats.byAnnotator, selectedDimension])
+
+  // Per-sample accuracy stats, responding to selectedDimension
+  const sampleAccuracyStats = useMemo(() => {
+    const sampleMap: Record<string, {
+      sampleId: string
+      annotatorCount: number
+      hardMatchCount: number
+      softMatchSum: number
+      videoAModel?: string
+      videoBModel?: string
+    }> = {}
+
+    stats.allSampleResults.forEach(sample => {
+      if (!sampleMap[sample.sampleId]) {
+        sampleMap[sample.sampleId] = {
+          sampleId: sample.sampleId,
+          annotatorCount: 0,
+          hardMatchCount: 0,
+          softMatchSum: 0,
+          videoAModel: sample.videoAModel,
+          videoBModel: sample.videoBModel,
+        }
+      }
+      const entry = sampleMap[sample.sampleId]
+      entry.annotatorCount++
+
+      if (selectedDimension === 'all') {
+        if (sample.hardMatch) entry.hardMatchCount++
+        entry.softMatchSum += sample.softMatchRate
+      } else {
+        const dimResult = sample.dimensionResults.find(d => d.dimension === selectedDimension)
+        if (dimResult?.isMatch) {
+          entry.hardMatchCount++
+        }
+      }
+    })
+
+    let result = Object.values(sampleMap).map(entry => ({
+      ...entry,
+      accuracy: selectedDimension === 'all'
+        ? (entry.annotatorCount > 0 ? entry.softMatchSum / entry.annotatorCount : 0)
+        : (entry.annotatorCount > 0 ? entry.hardMatchCount / entry.annotatorCount : 0),
+    }))
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      result = result.filter(s => s.sampleId.toLowerCase().includes(query))
+    }
+
+    // Sort
+    result.sort((a, b) => {
+      const aVal = sampleSortField === 'accuracy' ? a.accuracy : a.annotatorCount
+      const bVal = sampleSortField === 'accuracy' ? b.accuracy : b.annotatorCount
+      return sampleSortOrder === 'asc' ? aVal - bVal : bVal - aVal
+    })
+
+    return result
+  }, [stats.allSampleResults, selectedDimension, searchQuery, sampleSortField, sampleSortOrder])
+
+  const handlePairSampleSort = (field: 'accuracy' | 'annotatorCount') => {
+    if (sampleSortField === field) {
+      setSampleSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSampleSortField(field)
+      setSampleSortOrder('asc')
+    }
+  }
 
   return (
     <>
@@ -610,6 +682,122 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
         </div>
       </div>
 
+      {/* Per-Sample Accuracy */}
+      <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
+        <div className="px-6 py-4 border-b border-surface-800 bg-surface-900/50">
+          <h2 className="text-lg font-semibold text-white">
+            分样本准确率
+            {selectedDimension !== 'all' && (
+              <span className="text-sm font-normal text-surface-400 ml-2">
+                （{DIMENSION_LABELS[selectedDimension]}）
+              </span>
+            )}
+            <span className="text-sm font-normal text-surface-400 ml-2">
+              （共 {sampleAccuracyStats.length} 个样本）
+            </span>
+          </h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-left text-surface-400 text-sm border-b border-surface-800 bg-surface-900/30">
+                <th className="px-4 py-4 font-medium">Sample ID</th>
+                <th
+                  className="px-4 py-4 font-medium cursor-pointer hover:text-white transition-colors select-none"
+                  onClick={() => handlePairSampleSort('annotatorCount')}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    标注人数
+                    <ArrowUpDown className="w-3 h-3" />
+                  </span>
+                </th>
+                {selectedDimension === 'all' ? (
+                  <>
+                    <th className="px-4 py-4 font-medium">Hard Match</th>
+                    <th
+                      className="px-4 py-4 font-medium cursor-pointer hover:text-white transition-colors select-none"
+                      onClick={() => handlePairSampleSort('accuracy')}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        平均一致率
+                        <ArrowUpDown className="w-3 h-3" />
+                      </span>
+                    </th>
+                  </>
+                ) : (
+                  <th
+                    className="px-4 py-4 font-medium cursor-pointer hover:text-white transition-colors select-none"
+                    onClick={() => handlePairSampleSort('accuracy')}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      一致率
+                      <ArrowUpDown className="w-3 h-3" />
+                    </span>
+                  </th>
+                )}
+                <th className="px-4 py-4 font-medium">Model A</th>
+                <th className="px-4 py-4 font-medium">Model B</th>
+                <th className="px-4 py-4 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-800/50">
+              {sampleAccuracyStats.slice(0, 100).map(item => (
+                <tr key={item.sampleId} className="hover:bg-surface-800/30 transition-colors">
+                  <td className="px-4 py-4">
+                    <span className="text-sm text-white font-medium truncate block max-w-[200px]" title={item.sampleId}>
+                      {item.sampleId}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 text-sm text-surface-300">{item.annotatorCount}</td>
+                  {selectedDimension === 'all' ? (
+                    <>
+                      <td className="px-4 py-4 text-sm text-surface-300">
+                        {item.hardMatchCount} / {item.annotatorCount}
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={clsx(
+                          'font-medium',
+                          item.accuracy >= 0.8 ? 'text-green-400' :
+                          item.accuracy >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                        )}>
+                          {(item.accuracy * 100).toFixed(1)}%
+                        </span>
+                      </td>
+                    </>
+                  ) : (
+                    <td className="px-4 py-4">
+                      <span className={clsx(
+                        'font-medium',
+                        item.accuracy >= 0.8 ? 'text-green-400' :
+                        item.accuracy >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                      )}>
+                        {(item.accuracy * 100).toFixed(1)}%
+                      </span>
+                    </td>
+                  )}
+                  <td className="px-4 py-4 text-sm text-accent-400">{item.videoAModel || '-'}</td>
+                  <td className="px-4 py-4 text-sm text-orange-400">{item.videoBModel || '-'}</td>
+                  <td className="px-4 py-4">
+                    <button
+                      onClick={() => setMultiAnnotatorSampleId(item.sampleId)}
+                      className="px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-lg"
+                    >
+                      详情
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {sampleAccuracyStats.length === 0 && (
+            <div className="p-12 text-center text-surface-500">
+              没有找到匹配的样本
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Annotator Breakdown - only show when viewing all annotators */}
       {showAnnotatorTable && Object.keys(dimensionAnnotatorStats).length > 1 && (
         <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
@@ -654,6 +842,16 @@ function PairQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sho
             </table>
           </div>
         </div>
+      )}
+
+      {/* Multi-Annotator Detail Modal */}
+      {multiAnnotatorSampleId && (
+        <PairSampleMultiAnnotatorModal
+          sampleId={multiAnnotatorSampleId}
+          samples={stats.allSampleResults.filter(s => s.sampleId === multiAnnotatorSampleId)}
+          selectedDimension={selectedDimension}
+          onClose={() => setMultiAnnotatorSampleId(null)}
+        />
       )}
 
       {/* Mismatched Samples */}
@@ -879,7 +1077,10 @@ interface ScoreQAResultsProps {
 function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, showAnnotatorTable = true }: ScoreQAResultsProps) {
   const [selectedDimension, setSelectedDimension] = useState<Dimension | 'all'>('all')
   const [matchMode, setMatchMode] = useState<ScoreMatchMode>('hard')
-  
+  const [sampleSortField, setSampleSortField] = useState<'hardMatch' | 'softMatch' | 'annotatorCount'>('hardMatch')
+  const [sampleSortOrder, setSampleSortOrder] = useState<'asc' | 'desc'>('asc')
+  const [multiAnnotatorSampleId, setMultiAnnotatorSampleId] = useState<string | null>(null)
+
   // Generate dimension mismatches based on match mode
   // Hard Match: !isExactMatch (score not exactly equal)
   // Soft Match: !isLevelMatch (problem level different)
@@ -973,7 +1174,88 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
     
     return result
   }, [stats.allSampleResults, stats.byAnnotator, selectedDimension])
-  
+
+  // Per-sample accuracy stats, responding to selectedDimension
+  const scoreSampleAccuracyStats = useMemo(() => {
+    const sampleMap: Record<string, {
+      sampleId: string
+      annotatorCount: number
+      exactMatchSum: number
+      levelMatchSum: number
+      exactMatchDimCount: number
+      levelMatchDimCount: number
+      videoModel?: string
+    }> = {}
+
+    stats.allSampleResults.forEach(sample => {
+      if (!sampleMap[sample.sampleId]) {
+        sampleMap[sample.sampleId] = {
+          sampleId: sample.sampleId,
+          annotatorCount: 0,
+          exactMatchSum: 0,
+          levelMatchSum: 0,
+          exactMatchDimCount: 0,
+          levelMatchDimCount: 0,
+          videoModel: sample.videoModel,
+        }
+      }
+      const entry = sampleMap[sample.sampleId]
+      entry.annotatorCount++
+
+      if (selectedDimension === 'all') {
+        // Average the per-sample exactMatchRate and levelMatchRate
+        entry.exactMatchSum += sample.exactMatchCount / sample.totalDimensions
+        entry.levelMatchSum += sample.levelMatchCount / sample.totalDimensions
+      } else {
+        const dimResult = sample.dimensionResults.find(d => d.dimension === selectedDimension)
+        if (dimResult) {
+          if (dimResult.isExactMatch) entry.exactMatchDimCount++
+          if (dimResult.isLevelMatch) entry.levelMatchDimCount++
+        }
+      }
+    })
+
+    let result = Object.values(sampleMap).map(entry => ({
+      ...entry,
+      hardMatchRate: selectedDimension === 'all'
+        ? (entry.annotatorCount > 0 ? entry.exactMatchSum / entry.annotatorCount : 0)
+        : (entry.annotatorCount > 0 ? entry.exactMatchDimCount / entry.annotatorCount : 0),
+      softMatchRate: selectedDimension === 'all'
+        ? (entry.annotatorCount > 0 ? entry.levelMatchSum / entry.annotatorCount : 0)
+        : (entry.annotatorCount > 0 ? entry.levelMatchDimCount / entry.annotatorCount : 0),
+    }))
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      result = result.filter(s => s.sampleId.toLowerCase().includes(query))
+    }
+
+    // Sort
+    result.sort((a, b) => {
+      let aVal: number, bVal: number
+      if (sampleSortField === 'hardMatch') {
+        aVal = a.hardMatchRate; bVal = b.hardMatchRate
+      } else if (sampleSortField === 'softMatch') {
+        aVal = a.softMatchRate; bVal = b.softMatchRate
+      } else {
+        aVal = a.annotatorCount; bVal = b.annotatorCount
+      }
+      return sampleSortOrder === 'asc' ? aVal - bVal : bVal - aVal
+    })
+
+    return result
+  }, [stats.allSampleResults, selectedDimension, searchQuery, sampleSortField, sampleSortOrder])
+
+  const handleScoreSampleSort = (field: 'hardMatch' | 'softMatch' | 'annotatorCount') => {
+    if (sampleSortField === field) {
+      setSampleSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSampleSortField(field)
+      setSampleSortOrder('asc')
+    }
+  }
+
   return (
     <>
       {/* Stats Overview */}
@@ -1047,6 +1329,106 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
         </div>
       </div>
 
+      {/* Per-Sample Accuracy */}
+      <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
+        <div className="px-6 py-4 border-b border-surface-800 bg-surface-900/50">
+          <h2 className="text-lg font-semibold text-white">
+            分样本准确率
+            {selectedDimension !== 'all' && (
+              <span className="text-sm font-normal text-surface-400 ml-2">
+                （{DIMENSION_LABELS[selectedDimension]}）
+              </span>
+            )}
+            <span className="text-sm font-normal text-surface-400 ml-2">
+              （共 {scoreSampleAccuracyStats.length} 个样本）
+            </span>
+          </h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-left text-surface-400 text-sm border-b border-surface-800 bg-surface-900/30">
+                <th className="px-4 py-4 font-medium">Sample ID</th>
+                <th
+                  className="px-4 py-4 font-medium cursor-pointer hover:text-white transition-colors select-none"
+                  onClick={() => handleScoreSampleSort('annotatorCount')}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    标注人数
+                    <ArrowUpDown className="w-3 h-3" />
+                  </span>
+                </th>
+                <th
+                  className="px-4 py-4 font-medium cursor-pointer hover:text-white transition-colors select-none"
+                  onClick={() => handleScoreSampleSort('hardMatch')}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Hard Match
+                    <ArrowUpDown className="w-3 h-3" />
+                  </span>
+                </th>
+                <th
+                  className="px-4 py-4 font-medium cursor-pointer hover:text-white transition-colors select-none"
+                  onClick={() => handleScoreSampleSort('softMatch')}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Soft Match
+                    <ArrowUpDown className="w-3 h-3" />
+                  </span>
+                </th>
+                <th className="px-4 py-4 font-medium">模型</th>
+                <th className="px-4 py-4 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-800/50">
+              {scoreSampleAccuracyStats.slice(0, 100).map(item => (
+                <tr key={item.sampleId} className="hover:bg-surface-800/30 transition-colors">
+                  <td className="px-4 py-4">
+                    <span className="text-sm text-white font-medium truncate block max-w-[200px]" title={item.sampleId}>
+                      {item.sampleId}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 text-sm text-surface-300">{item.annotatorCount}</td>
+                  <td className="px-4 py-4">
+                    <span className={clsx(
+                      'font-medium',
+                      item.hardMatchRate >= 0.8 ? 'text-green-400' :
+                      item.hardMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                    )}>
+                      {(item.hardMatchRate * 100).toFixed(1)}%
+                    </span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <span className={clsx(
+                      'font-medium',
+                      item.softMatchRate >= 0.8 ? 'text-green-400' :
+                      item.softMatchRate >= 0.6 ? 'text-amber-400' : 'text-red-400'
+                    )}>
+                      {(item.softMatchRate * 100).toFixed(1)}%
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 text-sm text-accent-400">{item.videoModel || '-'}</td>
+                  <td className="px-4 py-4">
+                    <button
+                      onClick={() => setMultiAnnotatorSampleId(item.sampleId)}
+                      className="px-3 py-1.5 bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium rounded-lg"
+                    >
+                      详情
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {scoreSampleAccuracyStats.length === 0 && (
+            <div className="p-12 text-center text-surface-500">
+              没有找到匹配的样本
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Annotator Breakdown - only show when viewing all annotators */}
       {showAnnotatorTable && Object.keys(dimensionAnnotatorStats).length > 1 && (
         <div className="bg-surface-900 rounded-2xl border border-surface-800 mb-6 overflow-hidden">
@@ -1105,6 +1487,16 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
         </div>
       )}
 
+      {/* Multi-Annotator Detail Modal */}
+      {multiAnnotatorSampleId && (
+        <ScoreSampleMultiAnnotatorModal
+          sampleId={multiAnnotatorSampleId}
+          samples={stats.allSampleResults.filter(s => s.sampleId === multiAnnotatorSampleId)}
+          selectedDimension={selectedDimension}
+          onClose={() => setMultiAnnotatorSampleId(null)}
+        />
+      )}
+
       {/* Mismatched Samples - Per Dimension */}
       <div className="bg-surface-900 rounded-2xl border border-surface-800 overflow-hidden">
         <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/50 flex-wrap gap-3">
@@ -1120,7 +1512,7 @@ function ScoreQAResults({ stats, searchQuery, setSearchQuery, onSelectSample, sh
                 （共 {filteredDimensionMismatches.length} 条）
               </span>
             </h2>
-            
+
             {/* Match Mode Toggle */}
             <div className="flex bg-surface-800 rounded-lg p-0.5 border border-surface-700">
               <button
@@ -1760,6 +2152,467 @@ function ScoreSampleDetailModal({ sample, onClose }: ScoreSampleDetailModalProps
       {sample.firstFrameUrl && (
         <ImageModal
           src={sample.firstFrameUrl}
+          alt="First frame"
+          isOpen={showImageModal}
+          onClose={() => setShowImageModal(false)}
+        />
+      )}
+    </>
+  )
+}
+
+// Pair Sample Multi-Annotator Modal
+interface PairSampleMultiAnnotatorModalProps {
+  sampleId: string
+  samples: QAPairSampleResult[]
+  selectedDimension: Dimension | 'all'
+  onClose: () => void
+}
+
+function PairSampleMultiAnnotatorModal({ sampleId, samples, selectedDimension, onClose }: PairSampleMultiAnnotatorModalProps) {
+  const [showImageModal, setShowImageModal] = useState(false)
+  const shared = samples[0]
+
+  const goldenDimResults = shared?.dimensionResults
+    ? (selectedDimension === 'all'
+        ? shared.dimensionResults
+        : shared.dimensionResults.filter(d => d.dimension === selectedDimension))
+    : []
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-surface-900 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col border border-surface-800">
+          <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/80">
+            <div>
+              <h2 className="text-lg font-bold text-white">{sampleId}</h2>
+              <p className="text-sm text-surface-400">
+                {shared?.videoAModel && (
+                  <span>
+                    {shared.videoAModel} vs {shared.videoBModel}
+                  </span>
+                )}
+                <span className="ml-3">共 {samples.length} 位标注员</span>
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-10 h-10 rounded-xl bg-surface-800 hover:bg-surface-700 flex items-center justify-center transition-colors"
+            >
+              <X className="w-5 h-5 text-surface-400" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-auto p-6">
+            {/* Prompt */}
+            {shared?.prompt && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-surface-400 mb-2">Prompt</h3>
+                <div className="p-4 bg-surface-800/50 rounded-xl border border-surface-700/50">
+                  <p className="text-surface-200 text-sm whitespace-pre-wrap">{shared.prompt}</p>
+                </div>
+              </div>
+            )}
+
+            {/* First Frame */}
+            {shared?.firstFrameUrl && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-surface-400 mb-2">首帧图</h3>
+                <div
+                  className="relative w-fit cursor-pointer group"
+                  onClick={() => setShowImageModal(true)}
+                >
+                  <img
+                    src={shared.firstFrameUrl}
+                    alt="First frame"
+                    className="max-h-48 rounded-xl border border-surface-700 object-contain"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
+                    <Image className="w-8 h-8 text-white" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Video Compare */}
+            {shared?.videoAUrl && shared?.videoBUrl && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-surface-400 mb-2">视频对比</h3>
+                <VideoCompare
+                  videoAUrl={shared.videoAUrl}
+                  videoBUrl={shared.videoBUrl}
+                  modelA={shared.videoAModel || 'Model A'}
+                  modelB={shared.videoBModel || 'Model B'}
+                />
+              </div>
+            )}
+
+            {/* Golden Set Block */}
+            {goldenDimResults.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-amber-400 mb-3">Golden Set 标准</h3>
+                <div className="bg-surface-800/30 rounded-xl border border-amber-500/30 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-surface-400 text-xs">
+                        <th className="text-left px-4 py-2 font-medium">维度</th>
+                        <th className="text-center px-3 py-2 font-medium">结果</th>
+                        <th className="text-left px-3 py-2 font-medium">Video A 问题</th>
+                        <th className="text-left px-3 py-2 font-medium">Video B 问题</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {goldenDimResults.map((dimResult) => (
+                        <tr key={dimResult.dimension} className="border-t border-surface-700/30">
+                          <td className="px-4 py-2.5">
+                            <span className="text-white">{DIMENSION_LABELS[dimResult.dimension]}</span>
+                          </td>
+                          <td className="text-center px-3 py-2.5">
+                            <span className={clsx(
+                              'px-2 py-0.5 rounded text-xs font-bold',
+                              dimResult.goldenComparison === 'A>B' ? 'bg-green-500/15 text-green-400' :
+                              dimResult.goldenComparison === 'A<B' ? 'bg-red-500/15 text-red-400' :
+                              'bg-surface-700/50 text-surface-300'
+                            )}>
+                              {dimResult.goldenComparison}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-xs">
+                            {dimResult.goldenVideoAMajorReason && (
+                              <p className="text-surface-300"><span className="text-red-400">主要:</span> {dimResult.goldenVideoAMajorReason}</p>
+                            )}
+                            {dimResult.goldenVideoAMinorReason && (
+                              <p className="text-surface-400"><span className="text-amber-400">次要:</span> {dimResult.goldenVideoAMinorReason}</p>
+                            )}
+                            {!dimResult.goldenVideoAMajorReason && !dimResult.goldenVideoAMinorReason && (
+                              <p className="text-surface-500 italic">无问题</p>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs">
+                            {dimResult.goldenVideoBMajorReason && (
+                              <p className="text-surface-300"><span className="text-red-400">主要:</span> {dimResult.goldenVideoBMajorReason}</p>
+                            )}
+                            {dimResult.goldenVideoBMinorReason && (
+                              <p className="text-surface-400"><span className="text-amber-400">次要:</span> {dimResult.goldenVideoBMinorReason}</p>
+                            )}
+                            {!dimResult.goldenVideoBMajorReason && !dimResult.goldenVideoBMinorReason && (
+                              <p className="text-surface-500 italic">无问题</p>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Per-Annotator Details */}
+            <h3 className="text-sm font-medium text-surface-400 mb-3">标注员详情</h3>
+            <div className="space-y-2">
+              {samples.map((sample) => {
+                const filteredDimResults = selectedDimension === 'all'
+                  ? sample.dimensionResults
+                  : sample.dimensionResults.filter(d => d.dimension === selectedDimension)
+
+                return (
+                  <div key={sample.annotatorId} className="bg-surface-800/30 rounded-xl border border-surface-700/50 overflow-hidden">
+                    <div className="px-4 py-3">
+                      <span className="font-semibold text-cyan-400 text-sm">{sample.annotatorId}</span>
+                    </div>
+
+                    <div className="border-t border-surface-700/50">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-surface-400 text-xs">
+                            <th className="text-left px-4 py-2 font-medium">维度</th>
+                            <th className="text-center px-3 py-2 font-medium">标注</th>
+                            <th className="text-left px-3 py-2 font-medium">Video A 问题</th>
+                            <th className="text-left px-3 py-2 font-medium">Video B 问题</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredDimResults.map((dimResult) => (
+                            <tr key={dimResult.dimension} className="border-t border-surface-700/30">
+                              <td className="px-4 py-2.5">
+                                <span className="text-white">{DIMENSION_LABELS[dimResult.dimension]}</span>
+                              </td>
+                              <td className="text-center px-3 py-2.5">
+                                <span className={clsx(
+                                  'px-2 py-0.5 rounded text-xs font-bold',
+                                  dimResult.annotatorComparison === 'A>B' ? 'bg-green-500/15 text-green-400' :
+                                  dimResult.annotatorComparison === 'A<B' ? 'bg-red-500/15 text-red-400' :
+                                  'bg-surface-700/50 text-surface-300'
+                                )}>
+                                  {dimResult.annotatorComparison}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-xs">
+                                {dimResult.annotatorVideoAMajorReason && (
+                                  <p className="text-surface-300"><span className="text-red-400">主要:</span> {dimResult.annotatorVideoAMajorReason}</p>
+                                )}
+                                {dimResult.annotatorVideoAMinorReason && (
+                                  <p className="text-surface-400"><span className="text-amber-400">次要:</span> {dimResult.annotatorVideoAMinorReason}</p>
+                                )}
+                                {!dimResult.annotatorVideoAMajorReason && !dimResult.annotatorVideoAMinorReason && (
+                                  <p className="text-surface-500 italic">无问题</p>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-xs">
+                                {dimResult.annotatorVideoBMajorReason && (
+                                  <p className="text-surface-300"><span className="text-red-400">主要:</span> {dimResult.annotatorVideoBMajorReason}</p>
+                                )}
+                                {dimResult.annotatorVideoBMinorReason && (
+                                  <p className="text-surface-400"><span className="text-amber-400">次要:</span> {dimResult.annotatorVideoBMinorReason}</p>
+                                )}
+                                {!dimResult.annotatorVideoBMajorReason && !dimResult.annotatorVideoBMinorReason && (
+                                  <p className="text-surface-500 italic">无问题</p>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* First Frame Image Modal */}
+      {shared?.firstFrameUrl && (
+        <ImageModal
+          src={shared.firstFrameUrl}
+          alt="First frame"
+          isOpen={showImageModal}
+          onClose={() => setShowImageModal(false)}
+        />
+      )}
+    </>
+  )
+}
+
+// Score Sample Multi-Annotator Modal
+interface ScoreSampleMultiAnnotatorModalProps {
+  sampleId: string
+  samples: QAScoreSampleResult[]
+  selectedDimension: Dimension | 'all'
+  onClose: () => void
+}
+
+function ScoreSampleMultiAnnotatorModal({ sampleId, samples, selectedDimension, onClose }: ScoreSampleMultiAnnotatorModalProps) {
+  const [showImageModal, setShowImageModal] = useState(false)
+  const shared = samples[0]
+
+  const goldenDimResults = shared?.dimensionResults
+    ? (selectedDimension === 'all'
+        ? shared.dimensionResults
+        : shared.dimensionResults.filter(d => d.dimension === selectedDimension))
+    : []
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-surface-900 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col border border-surface-800">
+          <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/80">
+            <div>
+              <h2 className="text-lg font-bold text-white">{sampleId}</h2>
+              <p className="text-sm text-surface-400">
+                {shared?.videoModel && (
+                  <span className="text-accent-400">{shared.videoModel}</span>
+                )}
+                <span className="ml-3">共 {samples.length} 位标注员</span>
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-10 h-10 rounded-xl bg-surface-800 hover:bg-surface-700 flex items-center justify-center transition-colors"
+            >
+              <X className="w-5 h-5 text-surface-400" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-auto p-6">
+            {/* Prompt */}
+            {shared?.prompt && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-surface-400 mb-2">Prompt</h3>
+                <div className="p-4 bg-surface-800/50 rounded-xl border border-surface-700/50">
+                  <p className="text-surface-200 text-sm whitespace-pre-wrap">{shared.prompt}</p>
+                </div>
+              </div>
+            )}
+
+            {/* First Frame and Video side by side */}
+            <div className="mb-6 grid grid-cols-2 gap-4">
+              {/* First Frame */}
+              {shared?.firstFrameUrl && (
+                <div>
+                  <h3 className="text-sm font-medium text-surface-400 mb-2">首帧图</h3>
+                  <div
+                    className="relative cursor-pointer group"
+                    onClick={() => setShowImageModal(true)}
+                  >
+                    <img
+                      src={shared.firstFrameUrl}
+                      alt="First frame"
+                      className="w-full aspect-video rounded-xl border border-surface-700 object-cover"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
+                      <Image className="w-8 h-8 text-white" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Video */}
+              {shared?.videoUrl && (
+                <div>
+                  <h3 className="text-sm font-medium text-surface-400 mb-2">视频</h3>
+                  <div className="relative">
+                    <video
+                      src={shared.videoUrl}
+                      controls
+                      className="w-full aspect-video rounded-xl bg-black"
+                      playsInline
+                    />
+                    {shared.videoModel && (
+                      <div className="absolute top-3 left-3 px-3 py-1.5 bg-accent-600/90 backdrop-blur-sm rounded-lg text-xs font-bold text-white shadow-lg">
+                        {shared.videoModel}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Golden Set Block */}
+            {goldenDimResults.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-amber-400 mb-3">Golden Set 标准</h3>
+                <div className="bg-surface-800/30 rounded-xl border border-amber-500/30 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-surface-400 text-xs">
+                        <th className="text-left px-4 py-2 font-medium">维度</th>
+                        <th className="text-center px-3 py-2 font-medium">分数</th>
+                        <th className="text-left px-3 py-2 font-medium">问题描述</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {goldenDimResults.map((dimResult) => (
+                        <tr key={dimResult.dimension} className="border-t border-surface-700/30">
+                          <td className="px-4 py-2.5">
+                            <span className="text-white">{DIMENSION_LABELS[dimResult.dimension]}</span>
+                          </td>
+                          <td className="text-center px-3 py-2.5">
+                            <span className={clsx('font-bold', getScoreColor(dimResult.goldenScore))}>
+                              {dimResult.goldenScore}
+                            </span>
+                            <span className="text-surface-500 text-xs ml-1">
+                              ({getProblemLevelLabel(dimResult.goldenLevel)})
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-xs">
+                            {dimResult.goldenMajorReason && (
+                              <p className="text-surface-300"><span className="text-red-400">主要:</span> {dimResult.goldenMajorReason}</p>
+                            )}
+                            {dimResult.goldenMinorReason && (
+                              <p className="text-surface-400"><span className="text-amber-400">次要:</span> {dimResult.goldenMinorReason}</p>
+                            )}
+                            {!dimResult.goldenMajorReason && !dimResult.goldenMinorReason && (
+                              <p className="text-surface-500 italic">无问题描述</p>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Per-Annotator Details */}
+            <h3 className="text-sm font-medium text-surface-400 mb-3">标注员详情</h3>
+            <div className="space-y-2">
+              {samples.map((sample) => {
+                const filteredDimResults = selectedDimension === 'all'
+                  ? sample.dimensionResults
+                  : sample.dimensionResults.filter(d => d.dimension === selectedDimension)
+
+                return (
+                  <div key={sample.annotatorId} className="bg-surface-800/30 rounded-xl border border-surface-700/50 overflow-hidden">
+                    <div className="px-4 py-3">
+                      <span className="font-semibold text-cyan-400 text-sm">{sample.annotatorId}</span>
+                    </div>
+
+                    <div className="border-t border-surface-700/50">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-surface-400 text-xs">
+                            <th className="text-left px-4 py-2 font-medium">维度</th>
+                            <th className="text-center px-3 py-2 font-medium">标注</th>
+                            <th className="text-center px-3 py-2 font-medium">分差</th>
+                            <th className="text-left px-3 py-2 font-medium">问题描述</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredDimResults.map((dimResult) => {
+                            const scoreDiff = dimResult.annotatorScore - dimResult.goldenScore
+                            return (
+                              <tr key={dimResult.dimension} className="border-t border-surface-700/30">
+                                <td className="px-4 py-2.5">
+                                  <span className="text-white">{DIMENSION_LABELS[dimResult.dimension]}</span>
+                                </td>
+                                <td className="text-center px-3 py-2.5">
+                                  <span className={clsx('font-bold', getScoreColor(dimResult.annotatorScore))}>
+                                    {dimResult.annotatorScore}
+                                  </span>
+                                  <span className="text-surface-500 text-xs ml-1">
+                                    ({getProblemLevelLabel(dimResult.annotatorLevel)})
+                                  </span>
+                                </td>
+                                <td className="text-center px-3 py-2.5">
+                                  <span className={clsx(
+                                    'text-xs font-bold',
+                                    scoreDiff === 0 ? 'text-surface-500' :
+                                    scoreDiff > 0 ? 'text-green-400' : 'text-red-400'
+                                  )}>
+                                    {scoreDiff > 0 ? `+${scoreDiff}` : scoreDiff}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-xs">
+                                  {dimResult.annotatorMajorReason && (
+                                    <p className="text-surface-300"><span className="text-red-400">主要:</span> {dimResult.annotatorMajorReason}</p>
+                                  )}
+                                  {dimResult.annotatorMinorReason && (
+                                    <p className="text-surface-400"><span className="text-amber-400">次要:</span> {dimResult.annotatorMinorReason}</p>
+                                  )}
+                                  {!dimResult.annotatorMajorReason && !dimResult.annotatorMinorReason && (
+                                    <p className="text-surface-500 italic">无问题描述</p>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* First Frame Image Modal */}
+      {shared?.firstFrameUrl && (
+        <ImageModal
+          src={shared.firstFrameUrl}
           alt="First frame"
           isOpen={showImageModal}
           onClose={() => setShowImageModal(false)}
