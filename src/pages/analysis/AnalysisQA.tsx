@@ -151,7 +151,7 @@ export function AnalysisQA() {
             {/* Export Button - only show when stats exist */}
             {stats && (
               <button
-                onClick={() => exportQAToExcel(stats)}
+                onClick={() => void exportQAToExcel(stats)}
                 className="flex items-center gap-2 px-4 py-2 text-sm text-surface-400 hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors"
               >
                 <Download className="w-4 h-4" />

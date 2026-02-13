@@ -5,7 +5,7 @@
  * including per-annotator per-dimension hard/soft match rates.
  */
 
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 import type { Dimension } from '../../types'
 import { DIMENSION_LABELS, DIMENSIONS } from '../../types'
@@ -187,13 +187,36 @@ function formatPercent(rate: number): string {
 }
 
 /**
+ * Helper: add rows to an ExcelJS worksheet and set column widths
+ */
+function addRowsToSheet(
+  ws: ExcelJS.Worksheet,
+  rows: (string | number)[][],
+  colWidths: number[]
+): void {
+  for (const row of rows) {
+    ws.addRow(row)
+  }
+  ws.columns = colWidths.map(w => ({ width: w }))
+}
+
+/**
+ * Helper: write workbook to blob and trigger download
+ */
+async function saveWorkbook(wb: ExcelJS.Workbook, filename: string): Promise<void> {
+  const buffer = await wb.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  saveAs(blob, filename)
+}
+
+/**
  * Generate Excel workbook for Pair mode QA stats
  */
-export function exportPairQAToExcel(stats: QAPairStats, filename?: string): void {
+export async function exportPairQAToExcel(stats: QAPairStats, filename?: string): Promise<void> {
   const annotatorStats = calculatePairAnnotatorDimensionStats(stats)
   
   // Create workbook
-  const wb = XLSX.utils.book_new()
+  const wb = new ExcelJS.Workbook()
   
   // Sheet 1: Per-annotator per-dimension stats
   const headers = [
@@ -233,19 +256,15 @@ export function exportPairQAToExcel(stats: QAPairStats, filename?: string): void
     rows.push(totalRow)
   }
   
-  const ws1 = XLSX.utils.aoa_to_sheet(rows)
-  
-  // Set column widths
-  ws1['!cols'] = [
-    { wch: 15 }, // 标注人员
-    { wch: 8 },  // 样本数
-    ...DIMENSIONS.map(() => ({ wch: 14 })), // Hard match columns
-    ...DIMENSIONS.map(() => ({ wch: 14 })), // Soft match columns
-    { wch: 10 }, // Hard均值
-    { wch: 10 }, // Soft均值
-  ]
-  
-  XLSX.utils.book_append_sheet(wb, ws1, '分标注人员统计')
+  const ws1 = wb.addWorksheet('分标注人员统计')
+  addRowsToSheet(ws1, rows, [
+    15, // 标注人员
+    8,  // 样本数
+    ...DIMENSIONS.map(() => 14), // Hard match columns
+    ...DIMENSIONS.map(() => 14), // Soft match columns
+    10, // Hard均值
+    10, // Soft均值
+  ])
   
   // Sheet 2: Per-dimension summary
   const dimHeaders = ['维度', '样本数', '一致数', '一致率']
@@ -261,32 +280,22 @@ export function exportPairQAToExcel(stats: QAPairStats, filename?: string): void
     ])
   }
   
-  const ws2 = XLSX.utils.aoa_to_sheet(dimRows)
-  ws2['!cols'] = [
-    { wch: 12 },
-    { wch: 10 },
-    { wch: 10 },
-    { wch: 10 },
-  ]
+  const ws2 = wb.addWorksheet('分维度统计')
+  addRowsToSheet(ws2, dimRows, [12, 10, 10, 10])
   
-  XLSX.utils.book_append_sheet(wb, ws2, '分维度统计')
-  
-  // Generate file
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-  const blob = new Blob([wbout], { type: 'application/octet-stream' })
-  
+  // Generate file and download
   const defaultFilename = `QA_Pair_${new Date().toISOString().slice(0, 10)}.xlsx`
-  saveAs(blob, filename || defaultFilename)
+  await saveWorkbook(wb, filename || defaultFilename)
 }
 
 /**
  * Generate Excel workbook for Score mode QA stats
  */
-export function exportScoreQAToExcel(stats: QAScoreStats, filename?: string): void {
+export async function exportScoreQAToExcel(stats: QAScoreStats, filename?: string): Promise<void> {
   const annotatorStats = calculateScoreAnnotatorDimensionStats(stats)
   
   // Create workbook
-  const wb = XLSX.utils.book_new()
+  const wb = new ExcelJS.Workbook()
   
   // Sheet 1: Per-annotator per-dimension stats
   const headers = [
@@ -326,19 +335,15 @@ export function exportScoreQAToExcel(stats: QAScoreStats, filename?: string): vo
     rows.push(totalRow)
   }
   
-  const ws1 = XLSX.utils.aoa_to_sheet(rows)
-  
-  // Set column widths
-  ws1['!cols'] = [
-    { wch: 15 }, // 标注人员
-    { wch: 8 },  // 样本数
-    ...DIMENSIONS.map(() => ({ wch: 14 })), // Hard match columns
-    ...DIMENSIONS.map(() => ({ wch: 14 })), // Soft match columns
-    { wch: 10 }, // Hard均值
-    { wch: 10 }, // Soft均值
-  ]
-  
-  XLSX.utils.book_append_sheet(wb, ws1, '分标注人员统计')
+  const ws1 = wb.addWorksheet('分标注人员统计')
+  addRowsToSheet(ws1, rows, [
+    15, // 标注人员
+    8,  // 样本数
+    ...DIMENSIONS.map(() => 14), // Hard match columns
+    ...DIMENSIONS.map(() => 14), // Soft match columns
+    10, // Hard均值
+    10, // Soft均值
+  ])
   
   // Sheet 2: Per-dimension summary
   const dimHeaders = ['维度', '样本数', 'Hard一致数', 'Hard一致率', 'Soft一致数', 'Soft一致率']
@@ -356,36 +361,24 @@ export function exportScoreQAToExcel(stats: QAScoreStats, filename?: string): vo
     ])
   }
   
-  const ws2 = XLSX.utils.aoa_to_sheet(dimRows)
-  ws2['!cols'] = [
-    { wch: 12 },
-    { wch: 10 },
-    { wch: 12 },
-    { wch: 12 },
-    { wch: 12 },
-    { wch: 12 },
-  ]
+  const ws2 = wb.addWorksheet('分维度统计')
+  addRowsToSheet(ws2, dimRows, [12, 10, 12, 12, 12, 12])
   
-  XLSX.utils.book_append_sheet(wb, ws2, '分维度统计')
-  
-  // Generate file
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-  const blob = new Blob([wbout], { type: 'application/octet-stream' })
-  
+  // Generate file and download
   const defaultFilename = `QA_Score_${new Date().toISOString().slice(0, 10)}.xlsx`
-  saveAs(blob, filename || defaultFilename)
+  await saveWorkbook(wb, filename || defaultFilename)
 }
 
 /**
  * Export QA stats to Excel (auto-detect mode)
  */
-export function exportQAToExcel(
+export async function exportQAToExcel(
   stats: QAPairStats | QAScoreStats,
   filename?: string
-): void {
+): Promise<void> {
   if (stats.mode === 'pair') {
-    exportPairQAToExcel(stats as QAPairStats, filename)
+    await exportPairQAToExcel(stats as QAPairStats, filename)
   } else {
-    exportScoreQAToExcel(stats as QAScoreStats, filename)
+    await exportScoreQAToExcel(stats as QAScoreStats, filename)
   }
 }

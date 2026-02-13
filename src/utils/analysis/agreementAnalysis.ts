@@ -29,6 +29,9 @@ import type {
   AnnotatorSkillMetrics,
   QCOverlapAgreementStats,
   ClassifiedDisagreement,
+  LOOAnalysisResult,
+  LOOAnnotatorResult,
+  LOOMetrics,
 } from '../../types/analysis'
 
 const ALL_DIMENSIONS: Dimension[] = [
@@ -821,6 +824,268 @@ function classifyDisagreement(
   return {
     detail,
     matchCategory: hasSoftFail ? 'soft_fail' : 'hard_only',
+  }
+}
+
+// ============================================
+// Leave-One-Out (LOO) Analysis
+// ============================================
+
+/**
+ * Remove a specific annotator from grouped QC samples.
+ * Returns new grouped samples with entries from the annotator removed,
+ * filtering out samples that have fewer than 2 remaining annotators.
+ */
+function removeAnnotatorFromSamples(
+  groupedSamples: QCGroupedSample[],
+  annotatorId: string,
+): QCGroupedSample[] {
+  const filtered: QCGroupedSample[] = []
+  for (const group of groupedSamples) {
+    const remainingEntries = group.entries.filter(e => e.annotatorId !== annotatorId)
+    if (remainingEntries.length >= 2) {
+      filtered.push({ ...group, entries: remainingEntries })
+    }
+  }
+  return filtered
+}
+
+/**
+ * Calculate agreement rate (hard and soft) from grouped QC samples.
+ * Agreement rate = proportion of (sample, dimension) units where all annotators agree.
+ */
+function calculateAgreementRates(
+  groupedSamples: QCGroupedSample[],
+  mode: 'pair' | 'score' | 'mixed',
+): { hard: number; soft: number } {
+  let totalUnits = 0
+  let hardAgreeCount = 0
+  let softAgreeCount = 0
+
+  for (const group of groupedSamples) {
+    for (const dim of ALL_DIMENSIONS) {
+      const values: (string | number)[] = []
+      for (const entry of group.entries) {
+        if (entry.mode === 'score' && entry.scoreResult) {
+          const score = entry.scoreResult.scores[dim]?.score
+          if (score != null) values.push(score)
+        } else if (entry.mode === 'pair' && entry.pairResult) {
+          const comparison = entry.pairResult.dimensions[dim]?.comparison
+          if (comparison != null) values.push(comparison)
+        }
+      }
+
+      if (values.length < 2) continue
+      totalUnits++
+
+      // Hard agreement: all values identical
+      const allSame = values.every(v => v === values[0])
+      if (allSame) hardAgreeCount++
+
+      // Soft agreement: all pairs satisfy soft match
+      let allSoftMatch = true
+      for (let i = 0; i < values.length && allSoftMatch; i++) {
+        for (let j = i + 1; j < values.length && allSoftMatch; j++) {
+          if (mode === 'pair' || group.mode === 'pair') {
+            if (!isSoftMatchPair(values[i] as ComparisonResult, values[j] as ComparisonResult)) {
+              allSoftMatch = false
+            }
+          } else {
+            if (!isSoftMatchScore(values[i] as number, values[j] as number)) {
+              allSoftMatch = false
+            }
+          }
+        }
+      }
+      if (allSoftMatch) softAgreeCount++
+    }
+  }
+
+  return {
+    hard: totalUnits > 0 ? hardAgreeCount / totalUnits : 0,
+    soft: totalUnits > 0 ? softAgreeCount / totalUnits : 0,
+  }
+}
+
+/**
+ * Perform Leave-One-Out analysis on QC data.
+ * For each annotator, remove their annotations and recalculate all metrics.
+ */
+export function calculateLOOAnalysis(
+  groupedSamples: QCGroupedSample[],
+  mode: 'pair' | 'score' | 'mixed',
+): LOOAnalysisResult {
+  const softDistFn = mode === 'pair' ? softMatchDistancePair : softMatchDistanceScore
+
+  // Calculate original metrics
+  const origUnits = buildReliabilityMatrix(groupedSamples)
+  const origAlphaHard = calculateKrippendorffAlpha(origUnits, hardMatchDistance).alpha
+  const origAlphaSoft = calculateKrippendorffAlpha(origUnits, softDistFn).alpha
+  const origRates = calculateAgreementRates(groupedSamples, mode)
+
+  // Original per-dimension metrics
+  const origByDim: LOOAnalysisResult['originalByDimension'] = {} as LOOAnalysisResult['originalByDimension']
+  for (const dim of ALL_DIMENSIONS) {
+    const dimUnits = buildReliabilityMatrixForDimension(groupedSamples, dim)
+    const dimAlphaHard = calculateKrippendorffAlpha(dimUnits, hardMatchDistance).alpha
+    const dimAlphaSoft = calculateKrippendorffAlpha(dimUnits, softDistFn).alpha
+
+    // Per-dimension agreement rates
+    const dimSamples = groupedSamples.map(g => ({
+      ...g,
+      entries: g.entries,
+    }))
+    let dimTotalUnits = 0
+    let dimHardAgree = 0
+    let dimSoftAgree = 0
+    for (const group of dimSamples) {
+      const values: (string | number)[] = []
+      for (const entry of group.entries) {
+        if (entry.mode === 'score' && entry.scoreResult) {
+          const score = entry.scoreResult.scores[dim]?.score
+          if (score != null) values.push(score)
+        } else if (entry.mode === 'pair' && entry.pairResult) {
+          const comparison = entry.pairResult.dimensions[dim]?.comparison
+          if (comparison != null) values.push(comparison)
+        }
+      }
+      if (values.length < 2) continue
+      dimTotalUnits++
+      if (values.every(v => v === values[0])) dimHardAgree++
+      let allSoft = true
+      for (let i = 0; i < values.length && allSoft; i++) {
+        for (let j = i + 1; j < values.length && allSoft; j++) {
+          if (mode === 'pair' || group.mode === 'pair') {
+            if (!isSoftMatchPair(values[i] as ComparisonResult, values[j] as ComparisonResult)) allSoft = false
+          } else {
+            if (!isSoftMatchScore(values[i] as number, values[j] as number)) allSoft = false
+          }
+        }
+      }
+      if (allSoft) dimSoftAgree++
+    }
+
+    origByDim[dim] = {
+      alphaHard: dimAlphaHard,
+      alphaSoft: dimAlphaSoft,
+      agreementRateHard: dimTotalUnits > 0 ? dimHardAgree / dimTotalUnits : 0,
+      agreementRateSoft: dimTotalUnits > 0 ? dimSoftAgree / dimTotalUnits : 0,
+    }
+  }
+
+  // Collect all annotator IDs
+  const annotatorIds = new Set<string>()
+  for (const group of groupedSamples) {
+    for (const entry of group.entries) {
+      annotatorIds.add(entry.annotatorId)
+    }
+  }
+
+  // For each annotator, compute LOO metrics
+  const annotatorResults: LOOAnnotatorResult[] = []
+
+  for (const annotatorId of annotatorIds) {
+    // Count samples this annotator participates in
+    let sampleCount = 0
+    for (const group of groupedSamples) {
+      if (group.entries.some(e => e.annotatorId === annotatorId)) {
+        sampleCount++
+      }
+    }
+
+    // Remove annotator and compute metrics
+    const filteredSamples = removeAnnotatorFromSamples(groupedSamples, annotatorId)
+    const remainingSampleCount = filteredSamples.length
+
+    // Overall metrics after removal
+    const looUnits = buildReliabilityMatrix(filteredSamples)
+    const looAlphaHard = calculateKrippendorffAlpha(looUnits, hardMatchDistance).alpha
+    const looAlphaSoft = calculateKrippendorffAlpha(looUnits, softDistFn).alpha
+    const looRates = calculateAgreementRates(filteredSamples, mode)
+
+    const overall: LOOMetrics = {
+      alphaHard: looAlphaHard,
+      alphaSoft: looAlphaSoft,
+      agreementRateHard: looRates.hard,
+      agreementRateSoft: looRates.soft,
+      deltaAlphaHard: looAlphaHard - origAlphaHard,
+      deltaAlphaSoft: looAlphaSoft - origAlphaSoft,
+      deltaAgreementRateHard: looRates.hard - origRates.hard,
+      deltaAgreementRateSoft: looRates.soft - origRates.soft,
+    }
+
+    // Per-dimension metrics after removal
+    const byDimension: Record<Dimension, LOOMetrics> = {} as Record<Dimension, LOOMetrics>
+    for (const dim of ALL_DIMENSIONS) {
+      const dimUnits = buildReliabilityMatrixForDimension(filteredSamples, dim)
+      const dimAlphaHard = calculateKrippendorffAlpha(dimUnits, hardMatchDistance).alpha
+      const dimAlphaSoft = calculateKrippendorffAlpha(dimUnits, softDistFn).alpha
+
+      // Per-dimension agreement rates after removal
+      let dimTotalUnits = 0
+      let dimHardAgree = 0
+      let dimSoftAgree = 0
+      for (const group of filteredSamples) {
+        const values: (string | number)[] = []
+        for (const entry of group.entries) {
+          if (entry.mode === 'score' && entry.scoreResult) {
+            const score = entry.scoreResult.scores[dim]?.score
+            if (score != null) values.push(score)
+          } else if (entry.mode === 'pair' && entry.pairResult) {
+            const comparison = entry.pairResult.dimensions[dim]?.comparison
+            if (comparison != null) values.push(comparison)
+          }
+        }
+        if (values.length < 2) continue
+        dimTotalUnits++
+        if (values.every(v => v === values[0])) dimHardAgree++
+        let allSoft = true
+        for (let i = 0; i < values.length && allSoft; i++) {
+          for (let j = i + 1; j < values.length && allSoft; j++) {
+            if (mode === 'pair' || group.mode === 'pair') {
+              if (!isSoftMatchPair(values[i] as ComparisonResult, values[j] as ComparisonResult)) allSoft = false
+            } else {
+              if (!isSoftMatchScore(values[i] as number, values[j] as number)) allSoft = false
+            }
+          }
+        }
+        if (allSoft) dimSoftAgree++
+      }
+
+      const dimRateHard = dimTotalUnits > 0 ? dimHardAgree / dimTotalUnits : 0
+      const dimRateSoft = dimTotalUnits > 0 ? dimSoftAgree / dimTotalUnits : 0
+
+      byDimension[dim] = {
+        alphaHard: dimAlphaHard,
+        alphaSoft: dimAlphaSoft,
+        agreementRateHard: dimRateHard,
+        agreementRateSoft: dimRateSoft,
+        deltaAlphaHard: dimAlphaHard - origByDim[dim].alphaHard,
+        deltaAlphaSoft: dimAlphaSoft - origByDim[dim].alphaSoft,
+        deltaAgreementRateHard: dimRateHard - origByDim[dim].agreementRateHard,
+        deltaAgreementRateSoft: dimRateSoft - origByDim[dim].agreementRateSoft,
+      }
+    }
+
+    annotatorResults.push({
+      annotatorId,
+      sampleCount,
+      remainingSampleCount,
+      overall,
+      byDimension,
+    })
+  }
+
+  // Sort by deltaAlphaHard descending (most impactful annotator first)
+  annotatorResults.sort((a, b) => b.overall.deltaAlphaHard - a.overall.deltaAlphaHard)
+
+  return {
+    annotatorResults,
+    originalAlphaHard: origAlphaHard,
+    originalAlphaSoft: origAlphaSoft,
+    originalAgreementRateHard: origRates.hard,
+    originalAgreementRateSoft: origRates.soft,
+    originalByDimension: origByDim,
   }
 }
 

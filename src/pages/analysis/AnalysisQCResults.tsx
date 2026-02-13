@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { AnalysisHeader, VideoCompare } from '../../components/analysis'
 import { useQCResultStore } from '../../stores/qcResultStore'
 import { DIMENSION_LABELS, DIMENSIONS } from '../../types'
@@ -9,6 +9,7 @@ import type {
   AnnotatorSkillMetrics,
   ClassifiedDisagreement,
   QCGroupedSample,
+  LOOAnalysisResult,
 } from '../../types/analysis'
 import {
   Upload,
@@ -28,6 +29,10 @@ import {
   ArrowUpDown,
   X,
   Image,
+  UserMinus,
+  Film,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import clsx from 'clsx'
 import {
@@ -90,6 +95,7 @@ export function AnalysisQCResults() {
     fileInfos,
     agreementStats,
     detection,
+    looResult,
     isLoading,
     error,
     hasData,
@@ -97,13 +103,16 @@ export function AnalysisQCResults() {
     loadAnnotatorResults,
     calculateAgreement,
     clearAll,
+    selectedAnnotatorId,
+    setSelectedAnnotatorId,
+    getAnnotatorIds,
     getFilteredClassifiedDisagreements,
     getSampleDetails,
     getGroupedSample,
   } = useQCResultStore()
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [activeTab, setActiveTab] = useState<'overview' | 'alpha' | 'annotators' | 'dimensions' | 'disagreements'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'alpha' | 'annotators' | 'dimensions' | 'disagreements' | 'loo'>('overview')
   const [sortField, setSortField] = useState<'rank' | 'compositeScore' | 'majorityAgreementRateHard' | 'majorityAgreementRateSoft'>('rank')
   const [sortAsc, setSortAsc] = useState(true)
 
@@ -113,7 +122,21 @@ export function AnalysisQCResults() {
   const [disagreeSelectedDim, setDisagreeSelectedDim] = useState<Dimension | 'all'>('all')
   const [selectedDisagreement, setSelectedDisagreement] = useState<ClassifiedDisagreement | null>(null)
   const [disagreePage, setDisagreePage] = useState(1)
+  const [showAnnotatorDropdown, setShowAnnotatorDropdown] = useState(false)
+  const annotatorDropdownRef = useRef<HTMLDivElement>(null)
   const DISAGREE_PAGE_SIZE = 50
+
+  // Close annotator dropdown on outside click
+  useEffect(() => {
+    if (!showAnnotatorDropdown) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (annotatorDropdownRef.current && !annotatorDropdownRef.current.contains(e.target as Node)) {
+        setShowAnnotatorDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showAnnotatorDropdown])
 
   // ============================================
   // File handlers
@@ -395,6 +418,7 @@ export function AnalysisQCResults() {
                 { id: 'annotators' as const, label: '标注员排名', icon: <Users className="w-4 h-4" /> },
                 { id: 'dimensions' as const, label: '维度分析', icon: <TrendingUp className="w-4 h-4" /> },
                 { id: 'disagreements' as const, label: '分歧详情', icon: <AlertTriangle className="w-4 h-4" /> },
+                { id: 'loo' as const, label: 'Leave-One-Out', icon: <UserMinus className="w-4 h-4" /> },
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -781,6 +805,61 @@ export function AnalysisQCResults() {
                   </div>
                 </div>
 
+                {/* Annotator Filter */}
+                {getAnnotatorIds().length > 0 && (
+                  <div className="bg-surface-900 rounded-2xl border border-surface-800">
+                    <div className="px-6 py-4 flex items-center gap-4 flex-wrap">
+                      <div className="flex items-center gap-2 text-surface-400">
+                        <Users className="w-5 h-5" />
+                        <span className="text-sm font-medium">标注员筛选：</span>
+                      </div>
+                      <div className="relative" ref={annotatorDropdownRef}>
+                        <button
+                          onClick={() => setShowAnnotatorDropdown(!showAnnotatorDropdown)}
+                          className="flex items-center gap-2 px-4 py-2 bg-surface-800 border border-surface-700 rounded-lg text-sm hover:bg-surface-700 transition-colors min-w-[160px]"
+                        >
+                          <span className={selectedAnnotatorId ? 'text-cyan-400 font-medium' : 'text-surface-300'}>
+                            {selectedAnnotatorId || '全部标注员'}
+                          </span>
+                          <ChevronDown className={clsx('w-4 h-4 text-surface-400 transition-transform ml-auto', showAnnotatorDropdown && 'rotate-180')} />
+                        </button>
+
+                        {showAnnotatorDropdown && (
+                          <div className="absolute top-full left-0 mt-1 w-full bg-surface-800 border border-surface-700 rounded-lg shadow-xl z-20 py-1 max-h-60 overflow-y-auto">
+                            <button
+                              onClick={() => { setSelectedAnnotatorId(null); setShowAnnotatorDropdown(false); setDisagreePage(1) }}
+                              className={clsx(
+                                'w-full text-left px-4 py-2 text-sm transition-colors',
+                                !selectedAnnotatorId ? 'text-cyan-400 bg-surface-700/50' : 'text-surface-300 hover:bg-surface-700'
+                              )}
+                            >
+                              全部标注员
+                            </button>
+                            {getAnnotatorIds().map(id => (
+                              <button
+                                key={id}
+                                onClick={() => { setSelectedAnnotatorId(id); setShowAnnotatorDropdown(false); setDisagreePage(1) }}
+                                className={clsx(
+                                  'w-full text-left px-4 py-2 text-sm transition-colors',
+                                  selectedAnnotatorId === id ? 'text-cyan-400 bg-surface-700/50' : 'text-surface-300 hover:bg-surface-700'
+                                )}
+                              >
+                                {id}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {selectedAnnotatorId && (
+                        <span className="text-xs text-surface-500">
+                          当前查看 <span className="text-cyan-400">{selectedAnnotatorId}</span> 的质检结果
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Disagreement List */}
                 <div className="bg-surface-900 rounded-2xl border border-surface-800 overflow-hidden">
                   <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-900/50 flex-wrap gap-3">
@@ -972,6 +1051,11 @@ export function AnalysisQCResults() {
 
               </div>
             )}
+
+            {/* LOO Tab */}
+            {activeTab === 'loo' && looResult && (
+              <LOOAnalysisSection looResult={looResult} />
+            )}
           </>
         )}
       </div>
@@ -1107,6 +1191,227 @@ function SortableHeader({ label, field, currentField, asc, onSort }: {
   )
 }
 
+// ============================================
+// LOO Analysis Section
+// ============================================
+
+function LOOAnalysisSection({ looResult }: {
+  looResult: LOOAnalysisResult
+}) {
+  const [looDimTab, setLooDimTab] = useState<'overall' | Dimension>('overall')
+
+  const getDeltaColor = (delta: number) => {
+    if (delta > 0.005) return 'text-red-400'   // Removing this person improves metrics
+    if (delta < -0.005) return 'text-green-400' // Removing this person hurts metrics
+    return 'text-surface-400'
+  }
+
+  const getDeltaBg = (delta: number) => {
+    if (delta > 0.005) return 'bg-red-500/10'
+    if (delta < -0.005) return 'bg-green-500/10'
+    return ''
+  }
+
+  const formatDelta = (delta: number, isPercent = false) => {
+    const sign = delta > 0 ? '+' : ''
+    if (isPercent) {
+      return `${sign}${(delta * 100).toFixed(1)}%`
+    }
+    return `${sign}${delta.toFixed(3)}`
+  }
+
+  const formatValue = (value: number, isPercent = false) => {
+    if (isPercent) return `${(value * 100).toFixed(1)}%`
+    return value.toFixed(3)
+  }
+
+  // Get the data for current tab
+  const getMetrics = (result: LOOAnalysisResult['annotatorResults'][0]) => {
+    if (looDimTab === 'overall') return result.overall
+    return result.byDimension[looDimTab]
+  }
+
+  const getOriginal = () => {
+    if (looDimTab === 'overall') {
+      return {
+        alphaHard: looResult.originalAlphaHard,
+        alphaSoft: looResult.originalAlphaSoft,
+        agreementRateHard: looResult.originalAgreementRateHard,
+        agreementRateSoft: looResult.originalAgreementRateSoft,
+      }
+    }
+    return looResult.originalByDimension[looDimTab]
+  }
+
+  const original = getOriginal()
+
+  // Sort annotatorResults by current tab's deltaAlphaHard descending
+  const sortedResults = useMemo(() => {
+    return [...looResult.annotatorResults].sort((a, b) => {
+      const metricsA = getMetrics(a)
+      const metricsB = getMetrics(b)
+      return metricsB.deltaAlphaHard - metricsA.deltaAlphaHard
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [looResult, looDimTab])
+
+  return (
+    <div className="space-y-6">
+      {/* Info Banner */}
+      <div className="p-4 bg-accent-500/10 border border-accent-500/20 rounded-xl flex items-start gap-3">
+        <Info className="w-5 h-5 text-accent-400 flex-shrink-0 mt-0.5" />
+        <div className="text-sm text-accent-300">
+          <p className="font-medium text-white mb-1">Leave-One-Out 分析</p>
+          <p>逐个移除标注员后重新计算一致性指标，评估每个标注员对整体一致性的影响。</p>
+          <p className="mt-1 text-accent-400/80">
+            <span className="text-red-400">正值（红色）</span>：移除后指标上升，说明该标注员拉低了整体质量；
+            <span className="text-green-400 ml-1">负值（绿色）</span>：移除后指标下降，说明该标注员对一致性有正面贡献。
+          </p>
+          <p className="mt-1 text-surface-500">
+            注：移除后仅剩 2 名标注员，Alpha 稳定性有所降低，请结合其他指标综合判断。
+          </p>
+        </div>
+      </div>
+
+      {/* Original Metrics Summary */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-surface-900 rounded-2xl border border-surface-800 p-4">
+          <p className="text-xs text-surface-500 mb-1">原始 Alpha (Hard)</p>
+          <p className={clsx('text-xl font-bold font-mono', getAlphaColor(original.alphaHard))}>
+            {original.alphaHard.toFixed(3)}
+          </p>
+        </div>
+        <div className="bg-surface-900 rounded-2xl border border-surface-800 p-4">
+          <p className="text-xs text-surface-500 mb-1">原始 Alpha (Soft)</p>
+          <p className={clsx('text-xl font-bold font-mono', getAlphaColor(original.alphaSoft))}>
+            {original.alphaSoft.toFixed(3)}
+          </p>
+        </div>
+        <div className="bg-surface-900 rounded-2xl border border-surface-800 p-4">
+          <p className="text-xs text-surface-500 mb-1">原始一致率 (Hard)</p>
+          <p className="text-xl font-bold font-mono text-white">
+            {(original.agreementRateHard * 100).toFixed(1)}%
+          </p>
+        </div>
+        <div className="bg-surface-900 rounded-2xl border border-surface-800 p-4">
+          <p className="text-xs text-surface-500 mb-1">原始一致率 (Soft)</p>
+          <p className="text-xl font-bold font-mono text-white">
+            {(original.agreementRateSoft * 100).toFixed(1)}%
+          </p>
+        </div>
+      </div>
+
+      {/* Dimension Tab Switcher */}
+      <div className="bg-surface-900 rounded-2xl border border-surface-800 overflow-hidden">
+        <div className="px-5 py-4 border-b border-surface-800 flex items-center justify-between">
+          <h3 className="font-semibold text-white">LOO 分析结果</h3>
+        </div>
+
+        {/* Dimension Tabs */}
+        <div className="px-5 pt-4 flex gap-1 flex-wrap">
+          <button
+            onClick={() => setLooDimTab('overall')}
+            className={clsx(
+              'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+              looDimTab === 'overall'
+                ? 'bg-accent-600 text-white shadow-lg shadow-accent-600/20'
+                : 'text-surface-400 hover:text-white hover:bg-surface-800'
+            )}
+          >
+            整体
+          </button>
+          {DIMENSIONS.map(dim => (
+            <button
+              key={dim}
+              onClick={() => setLooDimTab(dim)}
+              className={clsx(
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                looDimTab === dim
+                  ? 'bg-accent-600 text-white shadow-lg shadow-accent-600/20'
+                  : 'text-surface-400 hover:text-white hover:bg-surface-800'
+              )}
+            >
+              {DIMENSION_LABELS[dim]}
+            </button>
+          ))}
+        </div>
+
+        {/* LOO Table */}
+        <div className="overflow-x-auto p-5">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-surface-800">
+                <th className="px-4 py-3 text-left text-xs font-medium text-surface-400 uppercase tracking-wider">标注员</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-surface-400 uppercase tracking-wider">参与样本</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-surface-400 uppercase tracking-wider">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" />
+                    Δ Alpha (Hard)
+                  </span>
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-surface-400 uppercase tracking-wider">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                    Δ Alpha (Soft)
+                  </span>
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-surface-400 uppercase tracking-wider">Δ 一致率 (Hard)</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-surface-400 uppercase tracking-wider">Δ 一致率 (Soft)</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-surface-400 uppercase tracking-wider">移除后 Alpha (H)</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-surface-400 uppercase tracking-wider">移除后 Alpha (S)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedResults.map((result) => {
+                const metrics = getMetrics(result)
+                return (
+                  <tr key={result.annotatorId} className={clsx(
+                    'border-b border-surface-800/50 hover:bg-surface-800/30 transition-colors',
+                    getDeltaBg(metrics.deltaAlphaHard)
+                  )}>
+                    <td className="px-4 py-3 font-medium text-white">{result.annotatorId}</td>
+                    <td className="px-4 py-3 text-surface-400">{result.sampleCount}</td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('font-mono font-bold', getDeltaColor(metrics.deltaAlphaHard))}>
+                        {formatDelta(metrics.deltaAlphaHard)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('font-mono font-bold', getDeltaColor(metrics.deltaAlphaSoft))}>
+                        {formatDelta(metrics.deltaAlphaSoft)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('font-mono font-bold', getDeltaColor(metrics.deltaAgreementRateHard))}>
+                        {formatDelta(metrics.deltaAgreementRateHard, true)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('font-mono font-bold', getDeltaColor(metrics.deltaAgreementRateSoft))}>
+                        {formatDelta(metrics.deltaAgreementRateSoft, true)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('font-mono text-surface-300')}>
+                        {formatValue(metrics.alphaHard)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={clsx('font-mono text-surface-300')}>
+                        {formatValue(metrics.alphaSoft)}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DisagreementDetailModal({ classified, getSampleDetails, getGroupedSample, onClose }: {
   classified: ClassifiedDisagreement
   getSampleDetails: (sampleId: string) => PairSample | ScoreSample | null
@@ -1114,6 +1419,7 @@ function DisagreementDetailModal({ classified, getSampleDetails, getGroupedSampl
   onClose: () => void
 }) {
   const [showImageModal, setShowImageModal] = useState(false)
+  const [showGtVideo, setShowGtVideo] = useState(false)
 
   const { detail } = classified
   const isScore = 'annotatorScores' in detail
@@ -1235,15 +1541,88 @@ function DisagreementDetailModal({ classified, getSampleDetails, getGroupedSampl
                         <span className="ml-1 text-surface-500">({(sampleDetails as ScoreSample).video_model})</span>
                       )}
                     </h3>
-                    <video
-                      src={(sampleDetails as ScoreSample).video_url}
-                      className="w-full max-w-lg rounded-xl bg-black"
-                      controls
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
-                    />
+                    {/* Score mode: side-by-side when GT video is shown */}
+                    {showGtVideo && sampleDetails.gt_video_url ? (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs text-surface-500 mb-1.5 font-medium">
+                            评分视频{(sampleDetails as ScoreSample).video_model && ` (${(sampleDetails as ScoreSample).video_model})`}
+                          </p>
+                          <video
+                            src={(sampleDetails as ScoreSample).video_url}
+                            className="w-full rounded-xl bg-black"
+                            controls
+                            muted
+                            loop
+                            playsInline
+                            preload="metadata"
+                          />
+                        </div>
+                        <div>
+                          <p className="text-xs text-surface-500 mb-1.5 font-medium">原视频 (GT)</p>
+                          <video
+                            src={sampleDetails.gt_video_url}
+                            className="w-full rounded-xl bg-black"
+                            controls
+                            muted
+                            loop
+                            playsInline
+                            preload="metadata"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <video
+                        src={(sampleDetails as ScoreSample).video_url}
+                        className="w-full max-w-lg rounded-xl bg-black"
+                        controls
+                        muted
+                        loop
+                        playsInline
+                        preload="metadata"
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* GT (Original) Video Toggle */}
+                {sampleDetails.gt_video_url && (
+                  <div className="mb-6">
+                    <button
+                      onClick={() => setShowGtVideo(!showGtVideo)}
+                      className={clsx(
+                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border',
+                        showGtVideo
+                          ? 'bg-cyan-600/20 border-cyan-500/30 text-cyan-400 hover:bg-cyan-600/30'
+                          : 'bg-surface-800 border-surface-700 text-surface-400 hover:bg-surface-700 hover:text-surface-200'
+                      )}
+                    >
+                      <Film className="w-4 h-4" />
+                      {showGtVideo ? (
+                        <><EyeOff className="w-4 h-4" /> 隐藏原视频</>
+                      ) : (
+                        <><Eye className="w-4 h-4" /> 显示原视频</>
+                      )}
+                    </button>
+
+                    {/* GT video for Pair mode - shown below A/B comparison */}
+                    {showGtVideo && isPairSample && (
+                      <div className="mt-3">
+                        <h3 className="text-sm font-medium text-surface-400 mb-2 flex items-center gap-2">
+                          <Film className="w-4 h-4 text-cyan-400" />
+                          原视频 (GT)
+                        </h3>
+                        <video
+                          src={sampleDetails.gt_video_url}
+                          className="w-full max-w-lg rounded-xl bg-black"
+                          controls
+                          muted
+                          loop
+                          playsInline
+                          preload="metadata"
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </>

@@ -487,6 +487,72 @@ export interface ClassifiedDisagreement {
   matchCategory: 'hard_only' | 'soft_fail'
 }
 
+// ============================================
+// Leave-One-Out (LOO) Analysis Types
+// ============================================
+
+/**
+ * LOO analysis result for a single annotator.
+ * Shows how metrics change when this annotator is removed.
+ */
+export interface LOOAnnotatorResult {
+  annotatorId: string
+  /** Number of QC samples this annotator participated in */
+  sampleCount: number
+  /** Number of valid QC samples remaining after removal (≥2 annotators) */
+  remainingSampleCount: number
+  /** Overall metrics after removing this annotator */
+  overall: LOOMetrics
+  /** Per-dimension metrics after removing this annotator */
+  byDimension: Record<Dimension, LOOMetrics>
+}
+
+/**
+ * Delta metrics for LOO analysis.
+ * Positive delta means removing the annotator IMPROVES the metric.
+ */
+export interface LOOMetrics {
+  /** Alpha (hard) after removal */
+  alphaHard: number
+  /** Alpha (soft) after removal */
+  alphaSoft: number
+  /** Agreement rate (hard) after removal */
+  agreementRateHard: number
+  /** Agreement rate (soft) after removal */
+  agreementRateSoft: number
+  /** Delta Alpha (hard): after - before. Positive = annotator hurts consistency */
+  deltaAlphaHard: number
+  /** Delta Alpha (soft): after - before. Positive = annotator hurts consistency */
+  deltaAlphaSoft: number
+  /** Delta agreement rate (hard) */
+  deltaAgreementRateHard: number
+  /** Delta agreement rate (soft) */
+  deltaAgreementRateSoft: number
+}
+
+/**
+ * Complete LOO analysis result
+ */
+export interface LOOAnalysisResult {
+  /** Per-annotator LOO results, sorted by deltaAlphaHard descending */
+  annotatorResults: LOOAnnotatorResult[]
+  /** Original overall Alpha (hard) before any removal */
+  originalAlphaHard: number
+  /** Original overall Alpha (soft) before any removal */
+  originalAlphaSoft: number
+  /** Original overall agreement rate (hard) */
+  originalAgreementRateHard: number
+  /** Original overall agreement rate (soft) */
+  originalAgreementRateSoft: number
+  /** Original per-dimension Alpha */
+  originalByDimension: Record<Dimension, {
+    alphaHard: number
+    alphaSoft: number
+    agreementRateHard: number
+    agreementRateSoft: number
+  }>
+}
+
 /**
  * Overall QC inter-annotator agreement statistics
  */

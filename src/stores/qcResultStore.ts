@@ -7,9 +7,10 @@ import type {
   AnnotatorSkillMetrics,
   ClassifiedDisagreement,
   QCGroupedSample,
+  LOOAnalysisResult,
 } from '../types/analysis'
 import type { PairSample, ScoreSample } from '../types'
-import { calculateInterAnnotatorAgreement } from '../utils/analysis/agreementAnalysis'
+import { calculateInterAnnotatorAgreement, calculateLOOAnalysis } from '../utils/analysis/agreementAnalysis'
 
 // ============================================
 // File info for uploaded files
@@ -34,6 +35,7 @@ interface QCResultState {
   // Computed results
   agreementStats: QCOverlapAgreementStats | null
   detection: QCDetectionResult | null
+  looResult: LOOAnalysisResult | null
 
   // UI state
   selectedAnnotatorId: string | null
@@ -85,6 +87,7 @@ export const useQCResultStore = create<QCResultState>((set, get) => ({
   fileInfos: [],
   agreementStats: null,
   detection: null,
+  looResult: null,
   selectedAnnotatorId: null,
   isLoading: false,
   error: null,
@@ -200,6 +203,7 @@ export const useQCResultStore = create<QCResultState>((set, get) => ({
         fileInfos,
         agreementStats: null,
         detection: null,
+        looResult: null,
         selectedAnnotatorId: null,
         isLoading: false,
       })
@@ -224,9 +228,13 @@ export const useQCResultStore = create<QCResultState>((set, get) => ({
     try {
       const stats = calculateInterAnnotatorAgreement(state.uploadedFiles)
 
+      // Calculate LOO analysis
+      const looResult = calculateLOOAnalysis(stats.groupedSamples, stats.mode === 'mixed' ? 'score' : stats.mode)
+
       set({
         agreementStats: stats,
         detection: stats.detection,
+        looResult,
         selectedAnnotatorId: null,
         isLoading: false,
       })
@@ -248,6 +256,7 @@ export const useQCResultStore = create<QCResultState>((set, get) => ({
       fileInfos: [],
       agreementStats: null,
       detection: null,
+      looResult: null,
       selectedAnnotatorId: null,
       error: null,
     })
