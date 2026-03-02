@@ -5,7 +5,7 @@ import { useAnalysisStore } from '../../stores/analysisStore'
 import { DIMENSION_LABELS, DIMENSIONS } from '../../types'
 import type { Dimension } from '../../types'
 import type { CombinedPairData, CombinedScoreData } from '../../types/analysis'
-import { Upload, Search, X } from 'lucide-react'
+import { Upload, Search, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
 
 type ViewMode = 'pair' | 'score'
@@ -224,8 +224,69 @@ export function AnalysisResults() {
   )
 }
 
+const PAGE_SIZE = 50
+
+function Pagination({ total, page, onPageChange }: { total: number; page: number; onPageChange: (p: number) => void }) {
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  if (totalPages <= 1) return null
+
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-t border-surface-800">
+      <span className="text-sm text-surface-500">
+        第 {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, total)} 条，共 {total} 条
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-surface-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        {Array.from({ length: totalPages }, (_, i) => i + 1)
+          .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+          .reduce<(number | 'ellipsis')[]>((acc, p, idx, arr) => {
+            if (idx > 0 && p - (arr[idx - 1]) > 1) acc.push('ellipsis')
+            acc.push(p)
+            return acc
+          }, [])
+          .map((p, idx) =>
+            p === 'ellipsis' ? (
+              <span key={`e${idx}`} className="px-1 text-surface-600">...</span>
+            ) : (
+              <button
+                key={p}
+                onClick={() => onPageChange(p)}
+                className={clsx(
+                  'min-w-[32px] h-8 rounded-lg text-sm font-medium transition-colors',
+                  p === page
+                    ? 'bg-accent-600 text-white'
+                    : 'text-surface-400 hover:text-white hover:bg-surface-800'
+                )}
+              >
+                {p}
+              </button>
+            )
+          )}
+        <button
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+          className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-surface-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // Pair Result Table
 function PairResultTable({ data, onViewDetail }: { data: CombinedPairData[]; onViewDetail: (d: CombinedPairData) => void }) {
+  const [page, setPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(data.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const pageData = data.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -244,7 +305,7 @@ function PairResultTable({ data, onViewDetail }: { data: CombinedPairData[]; onV
           </tr>
         </thead>
         <tbody className="divide-y divide-surface-800/50">
-          {data.slice(0, 100).map((item) => {
+          {pageData.map((item, idx) => {
             let winsA = 0, winsB = 0
             Object.values(item.result.dimensions).forEach((dim) => {
               if (dim.comparison === 'A>B') winsA++
@@ -253,7 +314,7 @@ function PairResultTable({ data, onViewDetail }: { data: CombinedPairData[]; onV
             const overallResult = winsA > winsB ? 'A wins' : winsB > winsA ? 'B wins' : 'Tie'
             
             return (
-              <tr key={item.sample.sample_id} className="hover:bg-surface-800/30 transition-colors">
+              <tr key={`${item.sample.sample_id}-${item.annotatorId}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
                 <td className="px-4 py-3">
                   <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={item.sample.sample_id}>
                     {item.sample.sample_id}
@@ -306,12 +367,18 @@ function PairResultTable({ data, onViewDetail }: { data: CombinedPairData[]; onV
       {data.length === 0 && (
         <div className="p-12 text-center text-surface-500">没有找到匹配的结果</div>
       )}
+      <Pagination total={data.length} page={safePage} onPageChange={setPage} />
     </div>
   )
 }
 
 // Score Result Table
 function ScoreResultTable({ data, onViewDetail }: { data: CombinedScoreData[]; onViewDetail: (d: CombinedScoreData) => void }) {
+  const [page, setPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(data.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const pageData = data.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -328,10 +395,10 @@ function ScoreResultTable({ data, onViewDetail }: { data: CombinedScoreData[]; o
           </tr>
         </thead>
         <tbody className="divide-y divide-surface-800/50">
-          {data.slice(0, 100).map((item) => {
+          {pageData.map((item, idx) => {
             const avgScore = Object.values(item.result.scores).reduce((sum, s) => sum + s.score, 0) / 5
             return (
-              <tr key={item.sample.sample_id} className="hover:bg-surface-800/30 transition-colors">
+              <tr key={`${item.sample.sample_id}-${item.annotatorId}-${idx}`} className="hover:bg-surface-800/30 transition-colors">
                 <td className="px-4 py-3">
                   <span className="text-sm text-white font-medium truncate block max-w-[180px]" title={item.sample.sample_id}>
                     {item.sample.sample_id}
@@ -391,6 +458,7 @@ function ScoreResultTable({ data, onViewDetail }: { data: CombinedScoreData[]; o
       {data.length === 0 && (
         <div className="p-12 text-center text-surface-500">没有找到匹配的结果</div>
       )}
+      <Pagination total={data.length} page={safePage} onPageChange={setPage} />
     </div>
   )
 }

@@ -70,47 +70,53 @@ export async function loadScoreData(resultFile: string): Promise<{
 }
 
 // Combine pair task and results
+// Iterates over results (not samples) so that multi-annotator merged data
+// preserves every annotator's result instead of deduplicating by sample_id.
 export function combinePairData(
   taskPackage: PairTaskPackage,
   results: PairAnnotationResult
 ): CombinedPairData[] {
-  const resultMap = new Map(results.results.map(r => [r.sample_id, r]))
-  // Use top-level annotator_id as default
+  const sampleMap = new Map<string, PairSample>()
+  for (const sample of taskPackage.samples) {
+    if (!sampleMap.has(sample.sample_id)) {
+      sampleMap.set(sample.sample_id, sample)
+    }
+  }
+
   const defaultAnnotatorId = results.annotator_id
-  
-  return taskPackage.samples
-    .filter(sample => resultMap.has(sample.sample_id))
-    .map(sample => {
-      const result = resultMap.get(sample.sample_id)!
-      return {
-        sample: sample as PairSample,
-        result,
-        // Use sample-level annotator_id if available, otherwise use default
-        annotatorId: result.annotator_id || defaultAnnotatorId,
-      }
-    })
+
+  return results.results
+    .filter(r => sampleMap.has(r.sample_id))
+    .map(r => ({
+      sample: sampleMap.get(r.sample_id)! as PairSample,
+      result: r,
+      annotatorId: r.annotator_id || defaultAnnotatorId,
+    }))
 }
 
 // Combine score task and results
+// Iterates over results (not samples) so that multi-annotator merged data
+// preserves every annotator's result instead of deduplicating by sample_id.
 export function combineScoreData(
   taskPackage: ScoreTaskPackage,
   results: ScoreAnnotationResult
 ): CombinedScoreData[] {
-  const resultMap = new Map(results.results.map(r => [r.sample_id, r]))
-  // Use top-level annotator_id as default
+  const sampleMap = new Map<string, ScoreSample>()
+  for (const sample of taskPackage.samples) {
+    if (!sampleMap.has(sample.sample_id)) {
+      sampleMap.set(sample.sample_id, sample)
+    }
+  }
+
   const defaultAnnotatorId = results.annotator_id
-  
-  return taskPackage.samples
-    .filter(sample => resultMap.has(sample.sample_id))
-    .map(sample => {
-      const result = resultMap.get(sample.sample_id)!
-      return {
-        sample: sample as ScoreSample,
-        result,
-        // Use sample-level annotator_id if available, otherwise use default
-        annotatorId: result.annotator_id || defaultAnnotatorId,
-      }
-    })
+
+  return results.results
+    .filter(r => sampleMap.has(r.sample_id))
+    .map(r => ({
+      sample: sampleMap.get(r.sample_id)! as ScoreSample,
+      result: r,
+      annotatorId: r.annotator_id || defaultAnnotatorId,
+    }))
 }
 
 // Default data files (new format)
